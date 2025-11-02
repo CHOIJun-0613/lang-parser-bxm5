@@ -21,10 +21,13 @@ def extract_beans_from_classes(classes: list[Class]) -> list[Bean]:
     
     for cls in classes:
         component_annotations = [ann for ann in cls.annotations if ann.category == "component"]
-        
+
         has_repository_annotation = any(ann.name == "Repository" for ann in cls.annotations)
-        
-        if component_annotations or has_repository_annotation:
+
+        # Bxm Framework: @BxmCategory 어노테이션이 있는 클래스도 Bean으로 인식
+        has_bxm_category = any(ann.name == "BxmCategory" for ann in cls.annotations)
+
+        if component_annotations or has_repository_annotation or has_bxm_category:
             bean_type = "component"  # default
             if any(ann.name in ["Service", "Service"] for ann in cls.annotations):
                 bean_type = "service"
@@ -34,7 +37,7 @@ def extract_beans_from_classes(classes: list[Class]) -> list[Bean]:
                 bean_type = "controller"
             elif any(ann.name in ["Configuration", "Configuration"] for ann in cls.annotations):
                 bean_type = "configuration"
-            
+
             scope = "singleton"
             for ann in cls.annotations:
                 if ann.name == "Scope":
@@ -46,15 +49,23 @@ def extract_beans_from_classes(classes: list[Class]) -> list[Bean]:
                         scope = "request"
                     elif "session" in str(ann.parameters):
                         scope = "session"
-            
+
             bean_name = cls.name[0].lower() + cls.name[1:] if cls.name else cls.name
-            
+
             bean_methods = []
             if bean_type == "configuration":
                 for method in cls.methods:
                     if any(ann.name == "Bean" for ann in method.annotations):
                         bean_methods.append(method)
-            
+
+            # Bxm Framework: @BxmDataAccess 어노테이션에서 datasource 추출
+            bxm_datasource = ""
+            for ann in cls.annotations:
+                if ann.name == "BxmDataAccess":
+                    if "value" in ann.parameters:
+                        bxm_datasource = ann.parameters["value"]
+                    break
+
             bean = Bean(
                 name=bean_name,
                 type=bean_type,
@@ -63,7 +74,8 @@ def extract_beans_from_classes(classes: list[Class]) -> list[Bean]:
                 package_name=cls.package_name,
                 annotation_names=[ann.name for ann in cls.annotations] if cls.annotations else [],
                 method_count=len(bean_methods) if bean_type == "configuration" else len(cls.methods) if cls.methods else 0,
-                property_count=len(cls.properties) if cls.properties else 0
+                property_count=len(cls.properties) if cls.properties else 0,
+                bxm_datasource=bxm_datasource
             )
             beans.append(bean)
     

@@ -623,7 +623,8 @@ def extract_mybatis_xml_mappers(directory: str, project_name: str = "", graph_db
     
     for root, _, files in os.walk(directory):
         for file in files:
-            if file.endswith("Mapper.xml") or file.endswith("Dao.xml"):
+            # Bxm Framework: .dbio 파일 지원 추가
+            if file.endswith("Mapper.xml") or file.endswith("Dao.xml") or file.endswith(".dbio"):
                 file_path = os.path.join(root, file)
                 mapper = parse_mybatis_xml_file(file_path)
                 if mapper:

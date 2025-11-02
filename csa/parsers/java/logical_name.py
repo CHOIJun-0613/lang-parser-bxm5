@@ -775,7 +775,7 @@ def process_project_with_custom_rules(project_name: str, file_path: str, file_ty
 def get_file_type(file_path: str) -> str:
     """파일 경로에서 파일 타입 결정"""
     file_extension = Path(file_path).suffix.lower()
-    
+
     if file_extension == '.java':
         return 'java'
     elif file_extension == '.xml':
@@ -790,3 +790,53 @@ def get_file_type(file_path: str) -> str:
         return 'xml'
     else:
         return 'unknown'
+
+
+# ===== rule001 기반 Bxm Framework 논리명 추출 함수 =====
+
+def extract_class_logical_name_from_annotations(annotations: list) -> str:
+    """
+    rule001: Class의 논리명을 @BxmCategory annotation의 logicalName 파라미터에서 추출
+
+    Args:
+        annotations: 클래스의 Annotation 객체 리스트
+
+    Returns:
+        논리명 문자열 (추출 실패 시 빈 문자열)
+    """
+    if not annotations:
+        return ""
+
+    for annotation in annotations:
+        if annotation.name == "BxmCategory":
+            if "logicalName" in annotation.parameters:
+                logical_name = annotation.parameters["logicalName"]
+                # 따옴표 제거
+                logical_name = logical_name.strip('"').strip("'")
+                return logical_name
+
+    return ""
+
+
+def extract_method_logical_name_from_annotations(annotations: list) -> str:
+    """
+    rule001: Method의 논리명을 @BxmCategory annotation의 logicalName 파라미터에서 추출
+
+    Args:
+        annotations: 메서드의 Annotation 객체 리스트
+
+    Returns:
+        논리명 문자열 (추출 실패 시 빈 문자열)
+    """
+    if not annotations:
+        return ""
+
+    for annotation in annotations:
+        if annotation.name == "BxmCategory":
+            if "logicalName" in annotation.parameters:
+                logical_name = annotation.parameters["logicalName"]
+                # 따옴표 제거
+                logical_name = logical_name.strip('"').strip("'")
+                return logical_name
+
+    return ""

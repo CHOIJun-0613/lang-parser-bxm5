@@ -141,13 +141,13 @@ def parse_inner_classes(
             # Inner class 선언부 소스 추출
             inner_class_source = extract_inner_class_source(body_item, file_content)
 
-            # 논리명 추출
-            from csa.services.java_parser_addon_r001 import extract_java_class_logical_name
-            inner_class_logical_name = extract_java_class_logical_name(file_content, body_item.name, project_name)
+            # 논리명 추출 (rule001: @BxmCategory의 logicalName 파라미터에서 추출)
+            from csa.services.java_parser_addon_r001 import extract_class_logical_name_from_annotations
+            inner_class_logical_name = extract_class_logical_name_from_annotations(inner_class_annotations) or ""
 
-            # description 추출
-            from csa.parsers.java.description import extract_java_class_description
-            inner_class_description = extract_java_class_description(inner_class_annotations, project_name)
+            # description 추출 (rule002: @BxmCategory의 description 파라미터에서 추출)
+            from csa.parsers.java.description import extract_class_description_from_annotations
+            inner_class_description = extract_class_description_from_annotations(inner_class_annotations) or ""
 
             # Inner class 노드 생성
             inner_class_node = Class(
@@ -161,7 +161,8 @@ def parse_inner_classes(
                 package_name=package_name,
                 project_name=project_name,
                 description=inner_class_description if inner_class_description else "",
-                ai_description=""
+                ai_description="",
+                bxm_category=inner_class_logical_name if inner_class_logical_name else ""
             )
 
             # imports 추가
@@ -332,14 +333,14 @@ def parse_single_java_file(file_path: str, project_name: str, graph_db: GraphDB 
         
         # sub_type 추출
         sub_type = extract_sub_type(package_name, class_name, class_annotations)
-        
-        # 논리명 추출 시도
-        from csa.services.java_parser_addon_r001 import extract_java_class_logical_name
-        class_logical_name = extract_java_class_logical_name(file_content, class_name, project_name)
 
-        # description 추출 시도 (Rule002)
-        from csa.parsers.java.description import extract_java_class_description
-        class_description = extract_java_class_description(class_annotations, project_name)
+        # 논리명 추출 시도 (rule001: @BxmCategory의 logicalName 파라미터에서 추출)
+        from csa.services.java_parser_addon_r001 import extract_class_logical_name_from_annotations
+        class_logical_name = extract_class_logical_name_from_annotations(class_annotations) or ""
+
+        # description 추출 시도 (rule002: @BxmCategory의 description 파라미터에서 추출)
+        from csa.parsers.java.description import extract_class_description_from_annotations
+        class_description = extract_class_description_from_annotations(class_annotations) or ""
 
         # AI 분석 수행 (오류 시 빈 문자열 반환)
         ai_description = ""
@@ -365,7 +366,8 @@ def parse_single_java_file(file_path: str, project_name: str, graph_db: GraphDB 
             package_name=package_name,
             project_name=project_name,
             description=class_description if class_description else "",
-            ai_description=ai_description
+            ai_description=ai_description,
+            bxm_category=class_logical_name if class_logical_name else ""
         )
 
         # imports 추가
@@ -475,13 +477,13 @@ def parse_single_java_file(file_path: str, project_name: str, graph_db: GraphDB 
                 
                 method_source = "".join(lines[start_line:end_line + 1])
             
-            # 논리명 추출 시도
-            from csa.services.java_parser_addon_r001 import extract_java_method_logical_name
-            method_logical_name = extract_java_method_logical_name(file_content, declaration.name, project_name)
+            # 논리명 추출 시도 (rule001: @BxmCategory의 logicalName 파라미터에서 추출)
+            from csa.services.java_parser_addon_r001 import extract_method_logical_name_from_annotations
+            method_logical_name = extract_method_logical_name_from_annotations(method_annotations) or ""
 
-            # description 추출 시도 (Rule002)
-            from csa.parsers.java.description import extract_java_method_description
-            method_description = extract_java_method_description(method_annotations, project_name)
+            # description 추출 시도 (rule002: @BxmCategory의 description 파라미터에서 추출)
+            from csa.parsers.java.description import extract_method_description_from_annotations
+            method_description = extract_method_description_from_annotations(method_annotations) or ""
 
             # AI 분석 수행 (오류 시 빈 문자열 반환)
             method_ai_description = ""
@@ -690,13 +692,13 @@ def parse_java_project_full(directory: str, graph_db: GraphDB = None) -> tuple[l
                             # sub_type 추출 (package name의 마지막 단어)
                             sub_type = extract_sub_type(package_name, class_name, class_annotations)
                             
-                            # 논리명 추출 시도
-                            from csa.services.java_parser_addon_r001 import extract_java_class_logical_name
-                            class_logical_name = extract_java_class_logical_name(file_content, class_name, project_name)
+                            # 논리명 추출 시도 (rule001: @BxmCategory의 logicalName 파라미터에서 추출)
+                            from csa.services.java_parser_addon_r001 import extract_class_logical_name_from_annotations
+                            class_logical_name = extract_class_logical_name_from_annotations(class_annotations) or ""
 
-                            # description 추출 시도 (Rule002)
-                            from csa.parsers.java.description import extract_java_class_description
-                            class_description = extract_java_class_description(class_annotations, project_name)
+                            # description 추출 시도 (rule002: @BxmCategory의 description 파라미터에서 추출)
+                            from csa.parsers.java.description import extract_class_description_from_annotations
+                            class_description = extract_class_description_from_annotations(class_annotations) or ""
 
                             classes[class_key] = Class(
                                 name=class_name,
@@ -709,7 +711,8 @@ def parse_java_project_full(directory: str, graph_db: GraphDB = None) -> tuple[l
                                 package_name=package_name,
                                 project_name=project_name,
                                 description=class_description if class_description else "",
-                                ai_description=""
+                                ai_description="",
+                                bxm_category=class_logical_name if class_logical_name else ""
                             )
                             class_to_package_map[class_key] = package_name
                             logger.debug(f"Successfully added class to classes dict: {class_name} (key: {class_key})")
@@ -829,13 +832,13 @@ def parse_java_project_full(directory: str, graph_db: GraphDB = None) -> tuple[l
                                 
                                 method_source = "".join(lines[start_line:end_line + 1])
 
-                            # 논리명 추출 시도
-                            from csa.services.java_parser_addon_r001 import extract_java_method_logical_name
-                            method_logical_name = extract_java_method_logical_name(file_content, declaration.name, project_name)
+                            # 논리명 추출 시도 (rule001: @BxmCategory의 logicalName 파라미터에서 추출)
+                            from csa.services.java_parser_addon_r001 import extract_method_logical_name_from_annotations
+                            method_logical_name = extract_method_logical_name_from_annotations(method_annotations) or ""
 
-                            # description 추출 시도 (Rule002)
-                            from csa.parsers.java.description import extract_java_method_description
-                            method_description = extract_java_method_description(method_annotations, project_name)
+                            # description 추출 시도 (rule002: @BxmCategory의 description 파라미터에서 추출)
+                            from csa.parsers.java.description import extract_method_description_from_annotations
+                            method_description = extract_method_description_from_annotations(method_annotations) or ""
 
                             method = Method(
                                 name=declaration.name,

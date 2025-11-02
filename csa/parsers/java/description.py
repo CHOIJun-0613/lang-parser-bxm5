@@ -70,14 +70,34 @@ class DescriptionExtractor:
         if not annotations:
             return ""
 
-        # @Tag annotation의 description 파라미터 찾기
+        # 1. rule002: @BxmCategory annotation의 description 파라미터 찾기 (최우선)
+        for annotation in annotations:
+            if annotation.name == "BxmCategory":
+                if "description" in annotation.parameters:
+                    desc = annotation.parameters["description"]
+                    # 따옴표 제거
+                    desc = desc.strip('"').strip("'")
+                    self.logger.debug(f"클래스 description 추출 성공 (@BxmCategory): {desc}")
+                    return desc
+
+        # 2. @Tag annotation의 description 파라미터 찾기 (fallback)
         for annotation in annotations:
             if annotation.name == "Tag" or annotation.name.endswith(".Tag"):
                 if "description" in annotation.parameters:
                     desc = annotation.parameters["description"]
                     # 따옴표 제거
                     desc = desc.strip('"').strip("'")
-                    self.logger.debug(f"클래스 description 추출 성공: {desc}")
+                    self.logger.debug(f"클래스 description 추출 성공 (@Tag): {desc}")
+                    return desc
+
+        # 3. @BXMType annotation의 description 파라미터 찾기 (fallback)
+        for annotation in annotations:
+            if annotation.name == "BXMType":
+                if "description" in annotation.parameters:
+                    desc = annotation.parameters["description"]
+                    # 따옴표 제거
+                    desc = desc.strip('"').strip("'")
+                    self.logger.debug(f"클래스 description 추출 성공 (@BXMType): {desc}")
                     return desc
 
         self.logger.debug("클래스 description를 찾을 수 없음")
@@ -95,14 +115,34 @@ class DescriptionExtractor:
         if not annotations:
             return ""
 
-        # @Operation annotation의 description 파라미터 찾기
+        # 1. rule002: @BxmCategory annotation의 description 파라미터 찾기 (최우선)
+        for annotation in annotations:
+            if annotation.name == "BxmCategory":
+                if "description" in annotation.parameters:
+                    desc = annotation.parameters["description"]
+                    # 따옴표 제거
+                    desc = desc.strip('"').strip("'")
+                    self.logger.debug(f"메서드 description 추출 성공 (@BxmCategory): {desc}")
+                    return desc
+
+        # 2. @Operation annotation의 description 파라미터 찾기 (fallback)
         for annotation in annotations:
             if annotation.name == "Operation" or annotation.name.endswith(".Operation"):
                 if "description" in annotation.parameters:
                     desc = annotation.parameters["description"]
                     # 따옴표 제거
                     desc = desc.strip('"').strip("'")
-                    self.logger.debug(f"메서드 description 추출 성공: {desc}")
+                    self.logger.debug(f"메서드 description 추출 성공 (@Operation): {desc}")
+                    return desc
+
+        # 3. @BXMType annotation의 description 파라미터 찾기 (fallback)
+        for annotation in annotations:
+            if annotation.name == "BXMType":
+                if "description" in annotation.parameters:
+                    desc = annotation.parameters["description"]
+                    # 따옴표 제거
+                    desc = desc.strip('"').strip("'")
+                    self.logger.debug(f"메서드 description 추출 성공 (@BXMType): {desc}")
                     return desc
 
         self.logger.debug("메서드 description를 찾을 수 없음")
@@ -248,3 +288,53 @@ def process_java_file_with_rule002(file_path: str, project_name: str, graph_db: 
     except Exception as e:
         extractor.logger.error(f"Java 파일 처리 실패: {file_path}, {e}")
         return False
+
+
+# ===== rule002 기반 Bxm Framework description 추출 함수 =====
+
+def extract_class_description_from_annotations(annotations: List[Annotation]) -> str:
+    """
+    rule002: Class의 description을 @BxmCategory annotation의 description 파라미터에서 추출
+
+    Args:
+        annotations: 클래스의 Annotation 객체 리스트
+
+    Returns:
+        description 문자열 (추출 실패 시 빈 문자열)
+    """
+    if not annotations:
+        return ""
+
+    for annotation in annotations:
+        if annotation.name == "BxmCategory":
+            if "description" in annotation.parameters:
+                desc = annotation.parameters["description"]
+                # 따옴표 제거
+                desc = desc.strip('"').strip("'")
+                return desc
+
+    return ""
+
+
+def extract_method_description_from_annotations(annotations: List[Annotation]) -> str:
+    """
+    rule002: Method의 description을 @BxmCategory annotation의 description 파라미터에서 추출
+
+    Args:
+        annotations: 메서드의 Annotation 객체 리스트
+
+    Returns:
+        description 문자열 (추출 실패 시 빈 문자열)
+    """
+    if not annotations:
+        return ""
+
+    for annotation in annotations:
+        if annotation.name == "BxmCategory":
+            if "description" in annotation.parameters:
+                desc = annotation.parameters["description"]
+                # 따옴표 제거
+                desc = desc.strip('"').strip("'")
+                return desc
+
+    return ""

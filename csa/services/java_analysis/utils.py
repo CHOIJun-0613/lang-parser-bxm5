@@ -221,7 +221,12 @@ def classify_springboot_annotation(annotation_name: str) -> str:
         "InsertProvider", "UpdateProvider", "DeleteProvider", "Results",
         "Result", "One", "Many", "MapKey", "Options", "SelectKey"
     }
-    
+
+    # Bxm Framework 특화 어노테이션
+    bxm_annotations = {
+        "BxmCategory", "BxmDataAccess", "BXMType", "BxmOmm_Field"
+    }
+
     if annotation_name in component_annotations:
         return "component"
     elif annotation_name in injection_annotations:
@@ -238,6 +243,8 @@ def classify_springboot_annotation(annotation_name: str) -> str:
         return "validation"
     elif annotation_name in mybatis_annotations:
         return "mybatis"
+    elif annotation_name in bxm_annotations:
+        return "bxm"
     else:
         return "other"
 

@@ -51,6 +51,7 @@ class Field(BaseModel):
     initial_value: str = ""  # Initial value of the field
     description: str = ""  # Brief description of the field
     ai_description: str = ""  # AI-generated description of the field
+    bxm_field_attrs: dict[str, Any] = {}  # Bxm Framework: @BxmOmm_Field 속성
 
 
 class Method(BaseModel):
@@ -102,7 +103,7 @@ class MethodCall(BaseModel):
 
 class Bean(BaseModel):
     """Represents a Spring Bean."""
-    
+
     name: str
     type: str  # "component", "service", "repository", "controller", "configuration"
     scope: str  # "singleton", "prototype", "request", "session"
@@ -113,6 +114,7 @@ class Bean(BaseModel):
     property_count: int = 0  # Number of properties
     description: str = ""  # Brief description of the bean
     ai_description: str = ""  # AI-generated description of the bean
+    bxm_datasource: str = ""  # Bxm Framework: @BxmDataAccess 값
 
 
 class BeanDependency(BaseModel):
@@ -488,6 +490,7 @@ class Class(BaseModel):
     package_name: str = ""
     description: str = ""  # Brief description of the class
     ai_description: str = ""  # AI-generated description of the class
+    bxm_category: str = ""  # Bxm Framework: @BxmCategory logicalName 값
 
     @model_validator(mode="before")
     @classmethod
