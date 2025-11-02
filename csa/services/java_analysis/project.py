@@ -1100,6 +1100,8 @@ def parse_java_project_streaming(
     # 진행 상황 추적 (스레드 안전)
     processed_classes = 0
     last_logged_percent = 0
+    failed_files = 0
+    timeout_files = 0
     progress_lock = Lock()
 
     # 1회 스캔: 모든 .java 파일 경로 수집
@@ -1153,6 +1155,9 @@ def parse_java_project_streaming(
     # 파싱된 결과를 임시 저장할 버퍼
     parsed_buffer = []
 
+    # 타임아웃 설정 (파일당 최대 30초, 전체는 무제한)
+    file_timeout = 30.0
+
     with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
         # 모든 파일을 병렬로 파싱 제출
         future_to_file = {
@@ -1160,43 +1165,73 @@ def parse_java_project_streaming(
             for file_path in java_files
         }
 
-        # 완료된 순서대로 처리
+        # 완료된 순서대로 처리 (타임아웃 없음 - 개별 파일 타임아웃만 적용)
         for future in as_completed(future_to_file):
             file_path = future_to_file[future]
             try:
-                # 파싱 결과 획득
-                _, package_node, class_node, inner_classes, package_name = future.result()
+                # 파싱 결과 획득 (개별 파일 타임아웃 적용)
+                try:
+                    _, package_node, class_node, inner_classes, package_name = future.result(timeout=file_timeout)
+                except TimeoutError:
+                    logger.warning(f"파싱 타임아웃 ({file_timeout}초 초과): {file_path}")
+                    with progress_lock:
+                        processed_classes += 1
+                        timeout_files += 1
+                    continue
 
                 # 파싱 실패 시 (에러 메시지가 package_name에 담김)
                 if class_node is None:
                     if isinstance(package_name, str) and package_name:
                         logger.error(f"Error parsing {file_path}: {package_name}")
+                    with progress_lock:
+                        processed_classes += 1
+                        failed_files += 1
                     continue
 
-                # 버퍼에 추가 (스레드 안전)
+                # 버퍼에 추가 및 배치 저장 여부 결정 (Lock 범위 최소화)
+                batch_to_save = None
+                should_log_progress = False
+                current_percent = 0
+                current_processed = 0
+
                 with progress_lock:
                     # Top-level 클래스와 Inner classes를 함께 저장
                     parsed_buffer.append((package_node, class_node, inner_classes, package_name))
                     processed_classes += 1
+                    current_processed = processed_classes
 
-                    # 진행 상황 로깅 (파싱 단계) - 10% 단위로만 출력
+                    # 진행 상황 로깅 체크 - 10% 단위로만 출력
                     current_percent = int((processed_classes / total_files) * 100) if total_files > 0 else 0
                     if current_percent > last_logged_percent and current_percent % 10 == 0:
                         last_logged_percent = current_percent
-                        logger.info(f"파싱 진행중 [{processed_classes}/{total_files}] ({current_percent}%)")
+                        should_log_progress = True
 
-                    # 배치 크기에 도달하거나 마지막 파일인 경우 저장
+                    # 배치 크기에 도달하거나 마지막 파일인 경우 저장 준비
                     if len(parsed_buffer) >= batch_size or processed_classes == total_files:
-                        batch_start_time = time.time()
-                        logger.debug(f"배치 저장 시작 ({len(parsed_buffer)}개 클래스)")
+                        # Lock 내에서는 복사만 수행 (최소 시간)
+                        batch_to_save = parsed_buffer.copy()
+                        parsed_buffer.clear()
 
-                        # Package는 이미 사전 생성되어 있으므로 건너뜀
+                # Lock 밖에서 로깅 수행
+                if should_log_progress:
+                    elapsed = time.time() - parse_start_time
+                    files_per_sec = current_processed / elapsed if elapsed > 0 else 0
+                    remaining = total_files - current_processed
+                    eta_seconds = remaining / files_per_sec if files_per_sec > 0 else 0
+                    eta_minutes = int(eta_seconds / 60)
+                    logger.info(f"파싱 진행중 [{current_processed}/{total_files}] ({current_percent}%) - {files_per_sec:.1f} files/sec, 예상 잔여시간: {eta_minutes}분")
+
+                # Lock 밖에서 Neo4j 저장 수행 (다른 스레드 블록 방지)
+                if batch_to_save:
+                    try:
+                        batch_start_time = time.time()
+                        logger.debug(f"배치 저장 시작 ({len(batch_to_save)}개 클래스)")
 
                         # Class 배치 저장 (Top-level + Inner classes)
                         classes_to_save = []
                         class_to_package = {}
 
-                        for package_node, class_node, inner_classes, package_name in parsed_buffer:
+                        for package_node, class_node, inner_classes, package_name in batch_to_save:
                             classes_to_save.append(class_node)
                             class_to_package[class_node.name] = package_name
 
@@ -1211,37 +1246,42 @@ def parse_java_project_streaming(
                             for cls in classes_to_save
                         ]
                         graph_db.add_classes_batch(classes_batch_data)
-                        stats['classes'] += len(classes_to_save)
 
                         # Bean/Endpoint 등 배치 저장
                         from csa.services.analysis.neo4j_writer import add_batch_class_objects_streaming
                         batch_stats = add_batch_class_objects_streaming(
-                            graph_db, parsed_buffer, project_name, logger
+                            graph_db, batch_to_save, project_name, logger
                         )
 
-                        # 통계 누적
-                        stats['beans'] += batch_stats.get('beans', 0)
-                        stats['endpoints'] += batch_stats.get('endpoints', 0)
-                        stats['jpa_entities'] += batch_stats.get('jpa_entities', 0)
-                        stats['jpa_repositories'] += batch_stats.get('jpa_repositories', 0)
-                        stats['jpa_queries'] += batch_stats.get('jpa_queries', 0)
-                        stats['test_classes'] += batch_stats.get('test_classes', 0)
-                        stats['mybatis_mappers'] += batch_stats.get('mybatis_mappers', 0)
-                        stats['sql_statements'] += batch_stats.get('sql_statements', 0)
+                        # 통계 누적 (Lock으로 보호)
+                        with progress_lock:
+                            stats['classes'] += len(classes_to_save)
+                            stats['beans'] += batch_stats.get('beans', 0)
+                            stats['endpoints'] += batch_stats.get('endpoints', 0)
+                            stats['jpa_entities'] += batch_stats.get('jpa_entities', 0)
+                            stats['jpa_repositories'] += batch_stats.get('jpa_repositories', 0)
+                            stats['jpa_queries'] += batch_stats.get('jpa_queries', 0)
+                            stats['test_classes'] += batch_stats.get('test_classes', 0)
+                            stats['mybatis_mappers'] += batch_stats.get('mybatis_mappers', 0)
+                            stats['sql_statements'] += batch_stats.get('sql_statements', 0)
+                            stats['processed_files'] += len(batch_to_save)
 
-                        stats['processed_files'] += len(parsed_buffer)
-
-                        # 버퍼 비우기
-                        parsed_buffer.clear()
                         batch_elapsed = time.time() - batch_start_time
                         logger.debug(f"배치 저장 완료 ({batch_elapsed:.2f}초)")
+
+                    except Exception as batch_error:
+                        logger.error(f"배치 저장 실패: {batch_error}")
+                        # 배치 저장 실패 시에도 계속 진행
+                        continue
 
             except Exception as e:
                 logger.error(f"Error processing {file_path}: {e}")
                 continue
 
     parse_elapsed = time.time() - parse_start_time
+    success_files = total_files - failed_files - timeout_files
     logger.info(f"파싱 및 저장 완료 - 소요 시간: {parse_elapsed:.2f}초 (파일당 평균: {parse_elapsed/total_files*1000:.0f}ms)")
+    logger.info(f"  성공: {success_files}/{total_files}, 실패: {failed_files}, 타임아웃: {timeout_files}")
 
     # 2. MyBatis XML mappers 추출 및 저장
     logger.info("MyBatis XML mappers 처리 중...")
