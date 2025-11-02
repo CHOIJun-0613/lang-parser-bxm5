@@ -1100,6 +1100,8 @@ def parse_java_project_streaming(
     # 진행 상황 추적 (스레드 안전)
     processed_classes = 0
     last_logged_percent = 0
+    last_logged_time = time.time()  # 마지막 로그 출력 시간
+    progress_interval = 5.0  # 5초마다 로그 출력
     failed_files = 0
     timeout_files = 0
     progress_lock = Lock()
@@ -1173,19 +1175,26 @@ def parse_java_project_streaming(
                 try:
                     _, package_node, class_node, inner_classes, package_name = future.result(timeout=file_timeout)
                 except TimeoutError:
-                    logger.warning(f"파싱 타임아웃 ({file_timeout}초 초과): {file_path}")
+                    # 파일명만 추출 (경로 제거)
+                    file_name = os.path.basename(file_path)
                     with progress_lock:
                         processed_classes += 1
                         timeout_files += 1
+                        current_timeout = timeout_files
+                    logger.warning(f"⏱️  파싱 타임아웃 #{current_timeout} ({file_timeout}초 초과): {file_name}")
                     continue
 
                 # 파싱 실패 시 (에러 메시지가 package_name에 담김)
                 if class_node is None:
-                    if isinstance(package_name, str) and package_name:
-                        logger.error(f"Error parsing {file_path}: {package_name}")
+                    file_name = os.path.basename(file_path)
                     with progress_lock:
                         processed_classes += 1
                         failed_files += 1
+                        current_failed = failed_files
+                    if isinstance(package_name, str) and package_name:
+                        logger.error(f"❌ 파싱 실패 #{current_failed}: {file_name} - {package_name}")
+                    else:
+                        logger.error(f"❌ 파싱 실패 #{current_failed}: {file_name}")
                     continue
 
                 # 버퍼에 추가 및 배치 저장 여부 결정 (Lock 범위 최소화)
@@ -1200,10 +1209,25 @@ def parse_java_project_streaming(
                     processed_classes += 1
                     current_processed = processed_classes
 
-                    # 진행 상황 로깅 체크 - 10% 단위로만 출력
+                    # 진행 상황 로깅 체크 - 5초마다 또는 10% 단위
                     current_percent = int((processed_classes / total_files) * 100) if total_files > 0 else 0
-                    if current_percent > last_logged_percent and current_percent % 10 == 0:
+                    current_time = time.time()  # Lock 안에서 시간 획득 (중복 출력 방지)
+                    time_since_last_log = current_time - last_logged_time
+
+                    # 5초 경과 또는 10% 단위 도달 또는 마지막 파일 시 로그 출력
+                    # (10% 단위는 정확히 한 번만 출력되도록 last_logged_percent로 제어)
+                    if time_since_last_log >= progress_interval:
+                        # 5초 경과: 항상 출력
+                        last_logged_time = current_time
+                        should_log_progress = True
+                    elif current_percent >= last_logged_percent + 10 and current_percent % 10 == 0:
+                        # 10% 단위 도달: 한 번만 출력
                         last_logged_percent = current_percent
+                        last_logged_time = current_time
+                        should_log_progress = True
+                    elif processed_classes == total_files:
+                        # 마지막 파일: 반드시 출력
+                        last_logged_time = current_time
                         should_log_progress = True
 
                     # 배치 크기에 도달하거나 마지막 파일인 경우 저장 준비
@@ -1219,13 +1243,21 @@ def parse_java_project_streaming(
                     remaining = total_files - current_processed
                     eta_seconds = remaining / files_per_sec if files_per_sec > 0 else 0
                     eta_minutes = int(eta_seconds / 60)
-                    logger.info(f"파싱 진행중 [{current_processed}/{total_files}] ({current_percent}%) - {files_per_sec:.1f} files/sec, 예상 잔여시간: {eta_minutes}분")
+
+                    # [mm:ss] 형식으로 경과 시간 표시
+                    elapsed_mm = int(elapsed / 60)
+                    elapsed_ss = int(elapsed % 60)
+                    logger.info(
+                        f"[{elapsed_mm:02d}:{elapsed_ss:02d}] "
+                        f"파싱 진행중 [{current_processed}/{total_files}] ({current_percent}%) "
+                        f"- {files_per_sec:.1f} files/sec, ETA: {eta_minutes}분"
+                    )
 
                 # Lock 밖에서 Neo4j 저장 수행 (다른 스레드 블록 방지)
                 if batch_to_save:
                     try:
                         batch_start_time = time.time()
-                        logger.debug(f"배치 저장 시작 ({len(batch_to_save)}개 클래스)")
+                        logger.info(f"  → 배치 저장 시작 ({len(batch_to_save)}개 클래스)")
 
                         # Class 배치 저장 (Top-level + Inner classes)
                         classes_to_save = []
@@ -1267,7 +1299,7 @@ def parse_java_project_streaming(
                             stats['processed_files'] += len(batch_to_save)
 
                         batch_elapsed = time.time() - batch_start_time
-                        logger.debug(f"배치 저장 완료 ({batch_elapsed:.2f}초)")
+                        logger.info(f"  ← 배치 저장 완료 ({batch_elapsed:.2f}초)")
 
                     except Exception as batch_error:
                         logger.error(f"배치 저장 실패: {batch_error}")
@@ -1275,7 +1307,11 @@ def parse_java_project_streaming(
                         continue
 
             except Exception as e:
-                logger.error(f"Error processing {file_path}: {e}")
+                file_name = os.path.basename(file_path)
+                logger.error(f"❌ 예외 발생: {file_name} - {e}")
+                with progress_lock:
+                    processed_classes += 1
+                    failed_files += 1
                 continue
 
     parse_elapsed = time.time() - parse_start_time
@@ -1286,41 +1322,82 @@ def parse_java_project_streaming(
     # 2. MyBatis XML mappers 추출 및 저장
     logger.info("MyBatis XML mappers 처리 중...")
     xml_mappers = extract_mybatis_xml_mappers(directory, project_name, graph_db)
-    for mapper in xml_mappers:
-        graph_db.add_mybatis_mapper(mapper, project_name)
-        stats['mybatis_mappers'] += 1
+    total_xml_mappers = len(xml_mappers)
 
-        # XML mapper의 SQL statements 즉시 추출 및 저장
-        sql_statements = extract_sql_statements_from_mappers([mapper], project_name)
-        if sql_statements:
-            relationships = []
-            for sql_statement in sql_statements:
-                graph_db.add_sql_statement(sql_statement, project_name)
-                relationships.append(
-                    {
-                        "mapper_name": sql_statement.mapper_name,
-                        "sql_id": sql_statement.id,
-                    }
-                )
-            if relationships:
-                graph_db.add_mapper_sql_relationships_batch(relationships, project_name)
-            stats['sql_statements'] += len(sql_statements)
+    if total_xml_mappers > 0:
+        logger.info(f"총 {total_xml_mappers}개 XML mapper 발견")
+        xml_start_time = time.time()
+        xml_last_log_time = xml_start_time
+
+        for i, mapper in enumerate(xml_mappers, 1):
+            graph_db.add_mybatis_mapper(mapper, project_name)
+            stats['mybatis_mappers'] += 1
+
+            # XML mapper의 SQL statements 즉시 추출 및 저장
+            sql_statements = extract_sql_statements_from_mappers([mapper], project_name)
+            if sql_statements:
+                relationships = []
+                for sql_statement in sql_statements:
+                    graph_db.add_sql_statement(sql_statement, project_name)
+                    relationships.append(
+                        {
+                            "mapper_name": sql_statement.mapper_name,
+                            "sql_id": sql_statement.id,
+                        }
+                    )
+                if relationships:
+                    graph_db.add_mapper_sql_relationships_batch(relationships, project_name)
+                stats['sql_statements'] += len(sql_statements)
+
+            # 10개마다 또는 5초마다 진행율 표시
+            current_time = time.time()
+            if (i % 10 == 0) or (current_time - xml_last_log_time >= 5.0) or (i == total_xml_mappers):
+                xml_percent = int(i / total_xml_mappers * 100)
+                logger.info(f"  XML mapper 처리중 [{i}/{total_xml_mappers}] ({xml_percent}%)")
+                xml_last_log_time = current_time
+
+        xml_elapsed = time.time() - xml_start_time
+        logger.info(f"XML mapper 처리 완료 ({total_xml_mappers}개, {xml_elapsed:.1f}초)")
+    else:
+        logger.info("XML mapper 없음")
 
 
     # 3. Config files 처리
     logger.info("Config files 처리 중...")
     config_files = extract_config_files(directory)
-    for config in config_files:
-        graph_db.add_config_file(config, project_name)
-        stats['config_files'] += 1
+    total_config_files = len(config_files)
+
+    if total_config_files > 0:
+        logger.info(f"총 {total_config_files}개 Config 파일 발견")
+        config_start_time = time.time()
+
+        for i, config in enumerate(config_files, 1):
+            graph_db.add_config_file(config, project_name)
+            stats['config_files'] += 1
+
+            # 5개마다 진행율 표시
+            if (i % 5 == 0) or (i == total_config_files):
+                config_percent = int(i / total_config_files * 100)
+                logger.info(f"  Config 파일 처리중 [{i}/{total_config_files}] ({config_percent}%)")
+
+        config_elapsed = time.time() - config_start_time
+        logger.info(f"Config 파일 처리 완료 ({total_config_files}개, {config_elapsed:.1f}초)")
+    else:
+        logger.info("Config 파일 없음")
 
     # 4. Bean 의존성 해결 (Neo4j 쿼리)
     if stats['beans'] > 0:
         logger.info("")
+        logger.info(f"Bean 의존성 해결 중... (총 {stats['beans']}개 Bean, 시간이 걸릴 수 있습니다)")
+        bean_start_time = time.time()
+
         from csa.services.java_analysis.bean_dependency_resolver import (
             resolve_bean_dependencies_from_neo4j
         )
         resolve_bean_dependencies_from_neo4j(graph_db, project_name, logger)
+
+        bean_elapsed = time.time() - bean_start_time
+        logger.info(f"Bean 의존성 해결 완료 ({bean_elapsed:.1f}초)")
 
     logger.info(f"Java project streaming analysis complete:")
     logger.info(f"  - Java files processed: {stats['processed_files']}/{stats['total_files']}")
