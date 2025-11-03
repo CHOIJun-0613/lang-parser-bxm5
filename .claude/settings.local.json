@@ -9,7 +9,9 @@
       "Bash(python:*)",
       "Bash(findstr:*)",
       "Bash(tasklist /FI \"IMAGENAME eq python.exe\" /FO TABLE)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "Bash(git checkout:*)",
+      "Bash(pip install:*)"
     ],
     "deny": [],
     "ask": []

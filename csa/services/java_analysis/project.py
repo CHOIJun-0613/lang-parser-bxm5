@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import re
 import time
+import psutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from queue import Queue
 from threading import Lock
@@ -426,166 +427,172 @@ def parse_single_java_file(file_path: str, project_name: str, graph_db: GraphDB 
                 )
                 class_node.properties.append(prop)
         
-        # 메서드 처리
-        all_declarations = class_declaration.methods + class_declaration.constructors
-        
-        for declaration in all_declarations:
-            local_var_map = field_map.copy()
-            params = []
-            for param in declaration.parameters:
-                param_type_name = 'Unknown'
-                if param.type:
-                    if hasattr(param.type, 'sub_type') and param.type.sub_type:
-                        param_type_name = f"{param.type.name}.{param.type.sub_type.name}"
-                    elif hasattr(param.type, 'name') and param.type.name:
-                        param_type_name = param.type.name
-                local_var_map[param.name] = param_type_name
-                params.append(Field(name=param.name, logical_name=f"{package_name}.{class_name}.{param.name}", type=param_type_name, package_name=package_name, class_name=class_name))
+        # 메서드 처리 (환경 변수로 DTO 생략 제어)
+        SKIP_DTO_METHODS = os.getenv("SKIP_DTO_METHODS", "true").lower() == "true"
+
+        if SKIP_DTO_METHODS and sub_type == "dto":
+            # DTO 메서드 분석 생략
+            logger.debug(f"DTO 메서드 분석 생략: {class_name} (sub_type={sub_type})")
+        else:
+            all_declarations = class_declaration.methods + class_declaration.constructors
             
-            if declaration.body:
-                for _, var_decl in declaration.filter(javalang.tree.LocalVariableDeclaration):
-                    for declarator in var_decl.declarators:
-                        local_var_map[declarator.name] = var_decl.type.name
-            
-            if isinstance(declaration, javalang.tree.MethodDeclaration):
-                return_type = declaration.return_type.name if declaration.return_type else "void"
-            else:
-                return_type = "constructor"
-            
-            modifiers = list(declaration.modifiers)
-            method_annotations = parse_annotations(declaration.annotations, "method") if hasattr(declaration, 'annotations') else []
-            
-            method_source = ""
-            if declaration.position:
-                lines = file_content.splitlines(keepends=True)
-                start_line = declaration.position.line - 1
+            for declaration in all_declarations:
+                local_var_map = field_map.copy()
+                params = []
+                for param in declaration.parameters:
+                    param_type_name = 'Unknown'
+                    if param.type:
+                        if hasattr(param.type, 'sub_type') and param.type.sub_type:
+                            param_type_name = f"{param.type.name}.{param.type.sub_type.name}"
+                        elif hasattr(param.type, 'name') and param.type.name:
+                            param_type_name = param.type.name
+                    local_var_map[param.name] = param_type_name
+                    params.append(Field(name=param.name, logical_name=f"{package_name}.{class_name}.{param.name}", type=param_type_name, package_name=package_name, class_name=class_name))
                 
-                brace_count = 0
-                end_line = start_line
-                for i in range(start_line, len(lines)):
-                    line = lines[i]
-                    for char in line:
-                        if char == '{':
-                            brace_count += 1
-                        elif char == '}':
-                            brace_count -= 1
-                            if brace_count == 0:
-                                end_line = i
-                                break
-                    if brace_count == 0:
-                        break
+                if declaration.body:
+                    for _, var_decl in declaration.filter(javalang.tree.LocalVariableDeclaration):
+                        for declarator in var_decl.declarators:
+                            local_var_map[declarator.name] = var_decl.type.name
                 
-                method_source = "".join(lines[start_line:end_line + 1])
-            
-            # 논리명 추출 시도 (rule001: @BxmCategory의 logicalName 파라미터에서 추출)
-            from csa.services.java_parser_addon_r001 import extract_method_logical_name_from_annotations
-            method_logical_name = extract_method_logical_name_from_annotations(method_annotations) or ""
-
-            # description 추출 시도 (rule002: @BxmCategory의 description 파라미터에서 추출)
-            from csa.parsers.java.description import extract_method_description_from_annotations
-            method_description = extract_method_description_from_annotations(method_annotations) or ""
-
-            # AI 분석 수행 (오류 시 빈 문자열 반환)
-            method_ai_description = ""
-            # USE_AI_ANALYSIS 환경 변수 확인 (기본값: 비활성화)
-            use_ai = os.getenv("USE_AI_ANALYSIS", "false").lower() == "true"
-            if use_ai and AI_ANALYZER_AVAILABLE and method_source:
-                analyzer = get_ai_analyzer()
-                if analyzer.is_available():
-                    # class_name도 함께 전달하여 로그에 Class.Method 형식으로 표시
-                    method_ai_description = analyzer.analyze_method(
-                        method_source,
-                        method_name=declaration.name,
-                        class_name=class_name
-                    )
-
-            method = Method(
-                name=declaration.name,
-                logical_name=method_logical_name if method_logical_name else "",
-                return_type=return_type,
-                parameters=params,
-                modifiers=modifiers,
-                source=method_source,
-                package_name=package_name,
-                annotations=method_annotations,
-                description=method_description if method_description else "",
-                ai_description=method_ai_description,
-                calls=[]  # 명시적으로 calls 속성 초기화
-            )
-            
-            # 메서드 호출 분석 - MethodCall 객체 생성
-            if declaration.body:
-                call_order = 1
-                for _, invocation in declaration.filter(javalang.tree.MethodInvocation):
-                    if not invocation.position:
-                        continue
+                if isinstance(declaration, javalang.tree.MethodDeclaration):
+                    return_type = declaration.return_type.name if declaration.return_type else "void"
+                else:
+                    return_type = "constructor"
+                
+                modifiers = list(declaration.modifiers)
+                method_annotations = parse_annotations(declaration.annotations, "method") if hasattr(declaration, 'annotations') else []
+                
+                method_source = ""
+                if declaration.position:
+                    lines = file_content.splitlines(keepends=True)
+                    start_line = declaration.position.line - 1
                     
-                    # 로그 메서드 자체 제외
-                    if invocation.qualifier and invocation.qualifier in ['log', 'logger', 'LOGGER']:
-                        if hasattr(invocation, 'member') and invocation.member in ['info', 'debug', 'warn', 'error', 'trace']:
-                            continue
+                    brace_count = 0
+                    end_line = start_line
+                    for i in range(start_line, len(lines)):
+                        line = lines[i]
+                        for char in line:
+                            if char == '{':
+                                brace_count += 1
+                            elif char == '}':
+                                brace_count -= 1
+                                if brace_count == 0:
+                                    end_line = i
+                                    break
+                        if brace_count == 0:
+                            break
                     
-                    target_class_name = None
-                    resolved_target_package = ""
-                    resolved_target_class_name = ""
-                    
-                    if invocation.qualifier:
-                        if invocation.qualifier in local_var_map:
-                            target_class_name = local_var_map[invocation.qualifier]
-                        else:
-                            target_class_name = invocation.qualifier
-                        
-                        if target_class_name:
-                            if target_class_name == "System.out":
-                                resolved_target_package = "java.io"
-                                resolved_target_class_name = "PrintStream"
-                            else:
-                                if invocation.qualifier in local_var_map:
-                                    resolved_target_class_name = target_class_name
-                                    if target_class_name in import_map:
-                                        resolved_target_package = ".".join(import_map[target_class_name].split(".")[:-1])
-                                    else:
-                                        # import_map에 없으면 현재 패키지만 사용
-                                        # (잘못된 패키지 추론 로직 제거)
-                                        resolved_target_package = package_name
-                                
-                                if '<' in target_class_name:
-                                    base_type = target_class_name.split('<')[0]
-                                    resolved_target_class_name = base_type
-                                
-                                if not resolved_target_class_name:
-                                    if target_class_name in import_map:
-                                        resolved_target_package = ".".join(import_map[target_class_name].split(".")[:-1])
-                                    else:
-                                        resolved_target_package = package_name
-                                    resolved_target_class_name = target_class_name
-                    else:
-                        resolved_target_package = package_name
-                        resolved_target_class_name = class_name
-
-                    if resolved_target_class_name:
-                        method_name = invocation.member
-                        # Stream API 메서드 필터링
-                        if method_name in {'collect', 'map', 'filter', 'forEach', 'stream', 'reduce', 'findFirst', 'findAny', 'anyMatch', 'allMatch', 'noneMatch', 'count', 'distinct', 'sorted', 'limit', 'skip', 'peek', 'flatMap', 'toArray'}:
-                            continue
-                            
-                        line_number = invocation.position.line if invocation.position else 0
-
-                        call = MethodCall(
-                            source_package=package_name,
-                            source_class=class_name,
-                            source_method=declaration.name,
-                            target_package=resolved_target_package,
-                            target_class=resolved_target_class_name,
-                            target_method=invocation.member,
-                            call_order=call_order,
-                            line_number=line_number,
-                            return_type="void"
+                    method_source = "".join(lines[start_line:end_line + 1])
+                
+                # 논리명 추출 시도 (rule001: @BxmCategory의 logicalName 파라미터에서 추출)
+                from csa.services.java_parser_addon_r001 import extract_method_logical_name_from_annotations
+                method_logical_name = extract_method_logical_name_from_annotations(method_annotations) or ""
+    
+                # description 추출 시도 (rule002: @BxmCategory의 description 파라미터에서 추출)
+                from csa.parsers.java.description import extract_method_description_from_annotations
+                method_description = extract_method_description_from_annotations(method_annotations) or ""
+    
+                # AI 분석 수행 (오류 시 빈 문자열 반환)
+                method_ai_description = ""
+                # USE_AI_ANALYSIS 환경 변수 확인 (기본값: 비활성화)
+                use_ai = os.getenv("USE_AI_ANALYSIS", "false").lower() == "true"
+                if use_ai and AI_ANALYZER_AVAILABLE and method_source:
+                    analyzer = get_ai_analyzer()
+                    if analyzer.is_available():
+                        # class_name도 함께 전달하여 로그에 Class.Method 형식으로 표시
+                        method_ai_description = analyzer.analyze_method(
+                            method_source,
+                            method_name=declaration.name,
+                            class_name=class_name
                         )
-                        class_node.calls.append(call)
-                        call_order += 1
-            
-            class_node.methods.append(method)
+    
+                method = Method(
+                    name=declaration.name,
+                    logical_name=method_logical_name if method_logical_name else "",
+                    return_type=return_type,
+                    parameters=params,
+                    modifiers=modifiers,
+                    source=method_source,
+                    package_name=package_name,
+                    annotations=method_annotations,
+                    description=method_description if method_description else "",
+                    ai_description=method_ai_description,
+                    calls=[]  # 명시적으로 calls 속성 초기화
+                )
+                
+                # 메서드 호출 분석 - MethodCall 객체 생성
+                if declaration.body:
+                    call_order = 1
+                    for _, invocation in declaration.filter(javalang.tree.MethodInvocation):
+                        if not invocation.position:
+                            continue
+                        
+                        # 로그 메서드 자체 제외
+                        if invocation.qualifier and invocation.qualifier in ['log', 'logger', 'LOGGER']:
+                            if hasattr(invocation, 'member') and invocation.member in ['info', 'debug', 'warn', 'error', 'trace']:
+                                continue
+                        
+                        target_class_name = None
+                        resolved_target_package = ""
+                        resolved_target_class_name = ""
+                        
+                        if invocation.qualifier:
+                            if invocation.qualifier in local_var_map:
+                                target_class_name = local_var_map[invocation.qualifier]
+                            else:
+                                target_class_name = invocation.qualifier
+                            
+                            if target_class_name:
+                                if target_class_name == "System.out":
+                                    resolved_target_package = "java.io"
+                                    resolved_target_class_name = "PrintStream"
+                                else:
+                                    if invocation.qualifier in local_var_map:
+                                        resolved_target_class_name = target_class_name
+                                        if target_class_name in import_map:
+                                            resolved_target_package = ".".join(import_map[target_class_name].split(".")[:-1])
+                                        else:
+                                            # import_map에 없으면 현재 패키지만 사용
+                                            # (잘못된 패키지 추론 로직 제거)
+                                            resolved_target_package = package_name
+                                    
+                                    if '<' in target_class_name:
+                                        base_type = target_class_name.split('<')[0]
+                                        resolved_target_class_name = base_type
+                                    
+                                    if not resolved_target_class_name:
+                                        if target_class_name in import_map:
+                                            resolved_target_package = ".".join(import_map[target_class_name].split(".")[:-1])
+                                        else:
+                                            resolved_target_package = package_name
+                                        resolved_target_class_name = target_class_name
+                        else:
+                            resolved_target_package = package_name
+                            resolved_target_class_name = class_name
+    
+                        if resolved_target_class_name:
+                            method_name = invocation.member
+                            # Stream API 메서드 필터링
+                            if method_name in {'collect', 'map', 'filter', 'forEach', 'stream', 'reduce', 'findFirst', 'findAny', 'anyMatch', 'allMatch', 'noneMatch', 'count', 'distinct', 'sorted', 'limit', 'skip', 'peek', 'flatMap', 'toArray'}:
+                                continue
+                                
+                            line_number = invocation.position.line if invocation.position else 0
+    
+                            call = MethodCall(
+                                source_package=package_name,
+                                source_class=class_name,
+                                source_method=declaration.name,
+                                target_package=resolved_target_package,
+                                target_class=resolved_target_class_name,
+                                target_method=invocation.member,
+                                call_order=call_order,
+                                line_number=line_number,
+                                return_type="void"
+                            )
+                            class_node.calls.append(call)
+                            call_order += 1
+                
+                class_node.methods.append(method)
 
         # Inner class 파싱
         inner_classes = parse_inner_classes(
@@ -1028,13 +1035,26 @@ def _parse_single_file_wrapper(file_path: str, project_name: str) -> tuple:
     Returns:
         tuple: (file_path, package_node, class_node, inner_classes, package_name) 또는 (file_path, None, None, [], None) on error
     """
+    logger = get_logger(__name__)
+    start_time = time.time()
+    file_name = os.path.basename(file_path)
+
     try:
         package_node, class_node, inner_classes, package_name = parse_single_java_file(
             file_path, project_name, None  # graph_db=None for parsing only
         )
+
+        # 처리 시간 계산 및 로깅
+        elapsed = time.time() - start_time
+        if elapsed >= 5.0:
+            logger.warning(f"⏱️  느린 파일 처리 ({elapsed:.1f}초): {file_name}")
+
         return (file_path, package_node, class_node, inner_classes, package_name)
     except Exception as e:
         # 예외 발생 시 None 반환 (메인 스레드에서 로깅)
+        elapsed = time.time() - start_time
+        if elapsed >= 5.0:
+            logger.warning(f"⏱️  느린 파일 처리 실패 ({elapsed:.1f}초): {file_name}")
         return (file_path, None, None, [], str(e))
 
 
@@ -1156,9 +1176,11 @@ def parse_java_project_streaming(
 
     # 파싱된 결과를 임시 저장할 버퍼
     parsed_buffer = []
+    last_batch_save_time = time.time()  # 마지막 배치 저장 시간
+    batch_save_interval = 10.0  # 10초마다 배치 저장 (버퍼에 데이터가 있을 경우)
 
-    # 타임아웃 설정 (파일당 최대 30초, 전체는 무제한)
-    file_timeout = 30.0
+    # 타임아웃 설정 (파일당 최대 10초로 단축)
+    file_timeout = 10.0
 
     with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
         # 모든 파일을 병렬로 파싱 제출
@@ -1230,11 +1252,19 @@ def parse_java_project_streaming(
                         last_logged_time = current_time
                         should_log_progress = True
 
-                    # 배치 크기에 도달하거나 마지막 파일인 경우 저장 준비
-                    if len(parsed_buffer) >= batch_size or processed_classes == total_files:
+                    # 배치 저장 조건: 크기 도달 OR 마지막 파일 OR 시간 경과
+                    time_since_last_save = current_time - last_batch_save_time
+                    should_save_batch = (
+                        len(parsed_buffer) >= batch_size or  # 배치 크기 도달
+                        processed_classes == total_files or  # 마지막 파일
+                        (len(parsed_buffer) > 0 and time_since_last_save >= batch_save_interval)  # 시간 경과
+                    )
+
+                    if should_save_batch:
                         # Lock 내에서는 복사만 수행 (최소 시간)
                         batch_to_save = parsed_buffer.copy()
                         parsed_buffer.clear()
+                        last_batch_save_time = current_time  # 마지막 저장 시간 갱신
 
                 # Lock 밖에서 로깅 수행
                 if should_log_progress:
@@ -1244,13 +1274,17 @@ def parse_java_project_streaming(
                     eta_seconds = remaining / files_per_sec if files_per_sec > 0 else 0
                     eta_minutes = int(eta_seconds / 60)
 
+                    # 메모리 사용량 측정
+                    process = psutil.Process()
+                    memory_mb = process.memory_info().rss / 1024 / 1024
+
                     # [mm:ss] 형식으로 경과 시간 표시
                     elapsed_mm = int(elapsed / 60)
                     elapsed_ss = int(elapsed % 60)
                     logger.info(
                         f"[{elapsed_mm:02d}:{elapsed_ss:02d}] "
                         f"파싱 진행중 [{current_processed}/{total_files}] ({current_percent}%) "
-                        f"- {files_per_sec:.1f} files/sec, ETA: {eta_minutes}분"
+                        f"- {files_per_sec:.1f} files/sec, ETA: {eta_minutes}분, RAM: {memory_mb:.0f}MB"
                     )
 
                 # Lock 밖에서 Neo4j 저장 수행 (다른 스레드 블록 방지)
