@@ -28,6 +28,11 @@ def calculate_project_statistics(
     Returns:
         Project: 통계가 업데이트된 Project 객체
     """
+    from csa.utils.logger import get_logger
+    logger = get_logger(__name__)
+
+    logger.debug(f"calculate_project_statistics 호출: classes 수={len(classes)}, java_source_folder={java_source_folder}")
+
     # 파일 수 집계
     total_file_count = 0
     total_java_file_count = 0
@@ -35,6 +40,7 @@ def calculate_project_statistics(
     total_etc_file_count = 0
 
     if java_source_folder and os.path.exists(java_source_folder):
+        logger.debug(f"파일 시스템 순회 시작: {java_source_folder}")
         for root, dirs, files in os.walk(java_source_folder):
             # 제외할 디렉터리 건너뛰기
             dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('node_modules', 'build', 'target', 'dist')]
@@ -48,21 +54,31 @@ def calculate_project_statistics(
 
                 if file.endswith('.java'):
                     total_java_file_count += 1
-                elif file.endswith('.xml'):
+                elif file.endswith('.xml') or file.endswith('.dbio'):
+                    # MyBatis Mapper 파일(.dbio)도 XML 파일로 간주
                     total_xml_file_count += 1
                 else:
                     total_etc_file_count += 1
+
+        logger.debug(f"파일 집계 완료: 전체={total_file_count}, Java={total_java_file_count}, XML={total_xml_file_count}, 기타={total_etc_file_count}")
+    else:
+        logger.warning(f"Java 소스 폴더가 존재하지 않음: {java_source_folder}")
 
     # LOC 통계 집계 (Java 파일만)
     total_ploc = 0
     total_lloc = 0
     total_cloc = 0
 
-    for class_obj in classes.values():
+    for class_name, class_obj in classes.items():
         if class_obj:
-            total_ploc += class_obj.PLOC
-            total_lloc += class_obj.LLOC
-            total_cloc += class_obj.CLOC
+            ploc = getattr(class_obj, 'PLOC', 0)
+            lloc = getattr(class_obj, 'LLOC', 0)
+            cloc = getattr(class_obj, 'CLOC', 0)
+            total_ploc += ploc
+            total_lloc += lloc
+            total_cloc += cloc
+
+    logger.debug(f"LOC 집계 완료: PLOC={total_ploc}, LLOC={total_lloc}, CLOC={total_cloc}")
 
     # Project 객체 업데이트
     project.total_file_count = total_file_count
@@ -118,7 +134,8 @@ def calculate_project_statistics_from_neo4j(
 
                 if file.endswith('.java'):
                     total_java_file_count += 1
-                elif file.endswith('.xml'):
+                elif file.endswith('.xml') or file.endswith('.dbio'):
+                    # MyBatis Mapper 파일(.dbio)도 XML 파일로 간주
                     total_xml_file_count += 1
                 else:
                     total_etc_file_count += 1

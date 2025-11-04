@@ -579,16 +579,36 @@ def save_java_objects_to_neo4j(
 
     # Project 통계 집계 (파일 수, LOC 통계)
     java_source_folder = os.getenv("JAVA_SOURCE_FOLDER", "")
+    logger.info(f"Project 통계 집계 시작: clean={clean}, java_source_folder={java_source_folder}")
 
-    if clean:
-        # --clean 모드: artifacts의 클래스만 사용
-        classes_dict = {cls.name: cls for cls in artifacts.classes if hasattr(cls, 'name')}
-        project = calculate_project_statistics(project, classes_dict, java_source_folder)
-    else:
-        # --update 모드: Neo4j에서 모든 클래스를 조회하여 통계 재계산
-        logger.info("--update 모드: Neo4j에서 모든 클래스 조회하여 통계 재계산 중...")
+    # 스트리밍 모드 확인
+    use_streaming = os.getenv("USE_STREAMING_PARSE", "false").lower() == "true"
+    logger.info(f"스트리밍 모드: {use_streaming}")
+
+    # 스트리밍 모드이거나 artifacts.classes가 비어있으면 Neo4j에서 조회
+    if use_streaming or not artifacts.classes:
+        # Neo4j에서 모든 클래스를 조회하여 통계 계산
+        logger.info("Neo4j에서 모든 클래스를 조회하여 통계 계산 중...")
         from csa.utils.project_statistics import calculate_project_statistics_from_neo4j
         project = calculate_project_statistics_from_neo4j(db, project, project_name, java_source_folder)
+    else:
+        # 배치 모드: artifacts의 클래스 사용
+        logger.info(f"배치 모드: artifacts.classes 수 = {len(artifacts.classes)}")
+
+        # artifacts.classes가 리스트인지 딕셔너리인지 확인
+        if isinstance(artifacts.classes, dict):
+            classes_dict = artifacts.classes
+            logger.info(f"artifacts.classes는 딕셔너리입니다. 키 수: {len(classes_dict)}")
+        else:
+            classes_dict = {cls.name: cls for cls in artifacts.classes if hasattr(cls, 'name')}
+            logger.info(f"artifacts.classes를 딕셔너리로 변환: {len(classes_dict)}개")
+
+        # 첫 번째 클래스의 LOC 값 확인 (디버깅)
+        if classes_dict:
+            first_class = next(iter(classes_dict.values()))
+            logger.debug(f"샘플 클래스: {first_class.name}, PLOC={getattr(first_class, 'PLOC', 'N/A')}, LLOC={getattr(first_class, 'LLOC', 'N/A')}, CLOC={getattr(first_class, 'CLOC', 'N/A')}")
+
+        project = calculate_project_statistics(project, classes_dict, java_source_folder)
 
     logger.info("프로젝트 통계: 전체 파일 %d개 (Java: %d, XML: %d, 기타: %d), PLOC: %d, LLOC: %d, CLOC: %d",
                 project.total_file_count, project.total_java_file_count, project.total_xml_file_count,

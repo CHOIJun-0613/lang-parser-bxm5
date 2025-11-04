@@ -178,12 +178,6 @@ def analyze_project(
 
         # Java 분석을 나중에 수행하여 DB 스키마와의 관계를 정확하게 연결
         if all_objects or java_object:
-            # 스트리밍 모드 확인
-            use_streaming = os.getenv("USE_STREAMING_PARSE", "false").lower() == "true"
-
-            if use_streaming and db:
-                db.add_project(project_entity)
-
             artifacts, final_project_name = analyze_full_project_java(
                 java_source_folder,
                 project_name,
@@ -195,24 +189,17 @@ def analyze_project(
                 project_entity.name = final_project_name
                 project_name = final_project_name
 
-            if use_streaming:
-                # 스트리밍 모드: Neo4j에서 직접 통계 조회
-                from csa.services.analysis.summary import get_java_stats_from_neo4j
-                # artifacts.metadata에 시간 정보가 있으면 전달
-                start_time = artifacts.metadata.get('start_time') if hasattr(artifacts, 'metadata') and artifacts.metadata else None
-                end_time = artifacts.metadata.get('end_time') if hasattr(artifacts, 'metadata') and artifacts.metadata else None
-                java_stats = get_java_stats_from_neo4j(db, final_project_name, logger, start_time, end_time)
-                if db:
-                    db.add_project(project_entity)
-            else:
-                # 배치 모드: 기존 방식으로 Neo4j에 저장
-                java_stats = save_java_objects_to_neo4j(
-                    db,
-                    artifacts,
-                    project_entity,
-                    clean,
-                    logger,
-                )
+            # 스트리밍/배치 모드 모두 save_java_objects_to_neo4j() 호출
+            # 이 함수는 내부에서 스트리밍 모드를 자동 감지하여
+            # - 스트리밍 모드: Neo4j에서 모든 클래스 조회하여 Project 통계 계산
+            # - 배치 모드: artifacts의 클래스로 Project 통계 계산
+            java_stats = save_java_objects_to_neo4j(
+                db,
+                artifacts,
+                project_entity,
+                clean,
+                logger,
+            )
 
         # 인덱스는 이미 데이터 저장 전에 생성됨
 

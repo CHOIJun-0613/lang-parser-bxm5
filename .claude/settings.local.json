@@ -12,7 +12,8 @@
       "Bash(powershell:*)",
       "Bash(git checkout:*)",
       "Bash(pip install:*)",
-      "Bash(.venvScriptspython.exe -m pytest tests/unit/test_loc_calculator.py -v)"
+      "Bash(.venvScriptspython.exe -m pytest tests/unit/test_loc_calculator.py -v)",
+      "Bash(.venv/Scripts/python.exe:*)"
     ],
     "deny": [],
     "ask": []
