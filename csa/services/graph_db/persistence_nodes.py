@@ -260,7 +260,7 @@ class PersistenceMixin:
     def _create_method_sql_relationships_tx(tx, project_name: str) -> int:
         relationship_query = """
         MATCH (c:Class {project_name: $project_name})
-        WHERE c.name ENDS WITH 'Repository' OR c.name ENDS WITH 'Mapper'
+        WHERE c.name ENDS WITH 'Repository' OR c.name ENDS WITH 'Mapper' OR c.name ENDS WITH 'DBM'
         MATCH (c)-[:HAS_METHOD]->(m:Method)
         MATCH (s:SqlStatement {project_name: $project_name})
         WHERE s.mapper_name = c.name
