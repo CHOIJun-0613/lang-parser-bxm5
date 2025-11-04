@@ -1,6 +1,6 @@
 cd .. 
 call .venv\Scripts\activate
-cmd /c "python -m csa.cli.main crud-matrix --project-name car-center-devlab --output-format excel"
+cmd /c "python -m csa.cli.main crud-matrix --project-name sml-fns-online"
 cd commands
-echo [ÇöÀç µð·ºÅä¸®] : %cd%
+echo [í˜„ìž¬ ë””ë ‰í† ë¦¬] : %cd%
 pause

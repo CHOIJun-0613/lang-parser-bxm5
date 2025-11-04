@@ -34,7 +34,14 @@ class ProjectMixin:
             "p.number_of_files = $number_of_files, "
             "p.path = $path, "
             "p.updated_at = $updated_at, "
-            "p.created_at = COALESCE(p.created_at, $created_at)"
+            "p.created_at = COALESCE(p.created_at, $created_at), "
+            "p.total_file_count = $total_file_count, "
+            "p.total_java_file_count = $total_java_file_count, "
+            "p.total_xml_file_count = $total_xml_file_count, "
+            "p.total_etc_file_count = $total_etc_file_count, "
+            "p.total_PLOC = $total_PLOC, "
+            "p.total_LLOC = $total_LLOC, "
+            "p.total_CLOC = $total_CLOC"
         )
         tx.run(
             project_query,
@@ -46,6 +53,13 @@ class ProjectMixin:
             path=project.path or "",
             updated_at=current_timestamp,
             created_at=created_at,
+            total_file_count=int(project.total_file_count or 0),
+            total_java_file_count=int(project.total_java_file_count or 0),
+            total_xml_file_count=int(project.total_xml_file_count or 0),
+            total_etc_file_count=int(project.total_etc_file_count or 0),
+            total_PLOC=int(project.total_PLOC or 0),
+            total_LLOC=int(project.total_LLOC or 0),
+            total_CLOC=int(project.total_CLOC or 0),
         )
 
     def add_package(self, package_node: Package, project_name: str) -> None:
@@ -216,7 +230,8 @@ class ProjectMixin:
             "c.superclass = $superclass, c.interfaces = $interfaces, "
             "c.imports = $imports, c.package_name = $package_name, "
             "c.project_name = $project_name, c.description = $description, c.ai_description = $ai_description, "
-            "c.updated_at = $updated_at"
+            "c.updated_at = $updated_at, "
+            "c.PLOC = $PLOC, c.LLOC = $LLOC, c.CLOC = $CLOC, c.cognitive_complexity = $cognitive_complexity"
         )
         tx.run(
             class_query,
@@ -234,6 +249,10 @@ class ProjectMixin:
             description=class_node.description or "",
             ai_description=class_node.ai_description or "",
             updated_at=current_timestamp,
+            PLOC=int(class_node.PLOC or 0),
+            LLOC=int(class_node.LLOC or 0),
+            CLOC=int(class_node.CLOC or 0),
+            cognitive_complexity=int(class_node.cognitive_complexity or 0),
         )
         if package_name:
             package_class_query = (
@@ -814,6 +833,10 @@ class ProjectMixin:
                 'description': class_node.description or "",
                 'ai_description': class_node.ai_description or "",
                 'updated_at': current_timestamp,
+                'PLOC': int(class_node.PLOC or 0),
+                'LLOC': int(class_node.LLOC or 0),
+                'CLOC': int(class_node.CLOC or 0),
+                'cognitive_complexity': int(class_node.cognitive_complexity or 0),
             })
 
         if class_records:
@@ -833,7 +856,11 @@ class ProjectMixin:
                     cls.project_name = c.project_name,
                     cls.description = c.description,
                     cls.ai_description = c.ai_description,
-                    cls.updated_at = c.updated_at
+                    cls.updated_at = c.updated_at,
+                    cls.PLOC = c.PLOC,
+                    cls.LLOC = c.LLOC,
+                    cls.CLOC = c.CLOC,
+                    cls.cognitive_complexity = c.cognitive_complexity
                 """,
                 classes=class_records
             )
@@ -1406,3 +1433,41 @@ class ProjectMixin:
                 """,
                 calls=call_records_internal
             )
+
+    def get_project_loc_statistics(self, project_name: str) -> dict:
+        """
+        프로젝트에 속한 모든 Class의 LOC 통계를 조회합니다.
+
+        Args:
+            project_name: 프로젝트명
+
+        Returns:
+            dict: LOC 통계 (total_ploc, total_lloc, total_cloc)
+        """
+        return self._execute_read(self._get_project_loc_statistics_tx, project_name)
+
+    @staticmethod
+    def _get_project_loc_statistics_tx(tx, project_name: str) -> dict:
+        """프로젝트의 LOC 통계를 조회하는 트랜잭션"""
+        query = """
+        MATCH (c:Class {project_name: $project_name})
+        WHERE c.PLOC IS NOT NULL
+        RETURN SUM(c.PLOC) AS total_ploc,
+               SUM(c.LLOC) AS total_lloc,
+               SUM(c.CLOC) AS total_cloc
+        """
+        result = tx.run(query, project_name=project_name)
+        record = result.single()
+
+        if record:
+            return {
+                'total_ploc': int(record['total_ploc'] or 0),
+                'total_lloc': int(record['total_lloc'] or 0),
+                'total_cloc': int(record['total_cloc'] or 0),
+            }
+        else:
+            return {
+                'total_ploc': 0,
+                'total_lloc': 0,
+                'total_cloc': 0,
+            }

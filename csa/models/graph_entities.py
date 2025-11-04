@@ -17,6 +17,17 @@ class Project(BaseModel):
     created_at: str = ""  # 생성 시간
     updated_at: str = ""  # 마지막 업데이트 시간
 
+    # 파일 통계
+    total_file_count: int = 0  # 프로젝트에 속한 모든 파일 수
+    total_java_file_count: int = 0  # 프로젝트에 속한 모든 자바 파일 수
+    total_xml_file_count: int = 0  # 프로젝트에 속한 XML 파일 수
+    total_etc_file_count: int = 0  # 프로젝트에 속한 java파일과 xml파일을 제외한 기타 파일 수
+
+    # LOC 통계 (자바 파일만 집계)
+    total_PLOC: int = 0  # 프로젝트에 속한 모든 자바 파일의 모든 라인 수 합계
+    total_LLOC: int = 0  # 프로젝트에 속한 모든 자바 파일의 실제 실행 가능한 구문 수 합계
+    total_CLOC: int = 0  # 프로젝트에 속한 모든 자바 파일의 주석라인 수 합계
+
 
 class Annotation(BaseModel):
     """Represents a Java annotation."""
@@ -491,6 +502,14 @@ class Class(BaseModel):
     description: str = ""  # Brief description of the class
     ai_description: str = ""  # AI-generated description of the class
     bxm_category: str = ""  # Bxm Framework: @BxmCategory logicalName 값
+
+    # LOC 메트릭
+    PLOC: int = 0  # Physical LOC (물리적 LOC): 파일에 있는 모든 라인의 수
+    LLOC: int = 0  # Logical LOC (논리적 LOC): 실제 실행 가능한 구문 라인수, 주석 라인과 공백 라인 제외
+    CLOC: int = 0  # Comment LOC (주석 LOC): 주석으로만 이루어진 라인의 수
+
+    # 복잡도 메트릭
+    cognitive_complexity: int = 0  # Cognitive Complexity: 코드가 사람이 이해하고 유지보수하기에 얼마나 어려운지를 측정하는 지표 (SonarSource)
 
     @model_validator(mode="before")
     @classmethod

@@ -14,6 +14,7 @@ from csa.models.analysis import JavaAnalysisArtifacts, JavaAnalysisStats
 from csa.models.graph_entities import Project
 from csa.services.analysis.summary import calculate_java_statistics
 from csa.services.graph_db import GraphDB
+from csa.utils.project_statistics import calculate_project_statistics
 from csa.services.java_parser import (
     analyze_bean_dependencies,
     extract_beans_from_classes,
@@ -575,6 +576,24 @@ def save_java_objects_to_neo4j(
     if not project.created_at:
         project.created_at = datetime.now().strftime("%Y/%m/%d %H:%M:%S.%f")[:-3]
     project.updated_at = datetime.now().strftime("%Y/%m/%d %H:%M:%S.%f")[:-3]
+
+    # Project 통계 집계 (파일 수, LOC 통계)
+    java_source_folder = os.getenv("JAVA_SOURCE_FOLDER", "")
+
+    if clean:
+        # --clean 모드: artifacts의 클래스만 사용
+        classes_dict = {cls.name: cls for cls in artifacts.classes if hasattr(cls, 'name')}
+        project = calculate_project_statistics(project, classes_dict, java_source_folder)
+    else:
+        # --update 모드: Neo4j에서 모든 클래스를 조회하여 통계 재계산
+        logger.info("--update 모드: Neo4j에서 모든 클래스 조회하여 통계 재계산 중...")
+        from csa.utils.project_statistics import calculate_project_statistics_from_neo4j
+        project = calculate_project_statistics_from_neo4j(db, project, project_name, java_source_folder)
+
+    logger.info("프로젝트 통계: 전체 파일 %d개 (Java: %d, XML: %d, 기타: %d), PLOC: %d, LLOC: %d, CLOC: %d",
+                project.total_file_count, project.total_java_file_count, project.total_xml_file_count,
+                project.total_etc_file_count, project.total_PLOC, project.total_LLOC, project.total_CLOC)
+
     db.add_project(project)
 
     _add_packages(db, artifacts.packages, project_name, logger)

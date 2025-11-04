@@ -1,6 +1,6 @@
 cd .. 
 call .venv\Scripts\activate
-cmd /c "python -m csa.cli.main sequence --class-name UserController --project-name car-center-devlab --image-format svg"
+cmd /c "python -m csa.cli.main sequence --class-name UserController --project-name sml-fns-online --image-format svg"
 cd commands
-echo [ÇöÀç µð·ºÅä¸®] : %cd%
+echo [í˜„ìž¬ ë””ë ‰í† ë¦¬] : %cd%
 pause

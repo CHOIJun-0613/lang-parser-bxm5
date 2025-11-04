@@ -31,6 +31,8 @@ from csa.models.graph_entities import (
 )
 from csa.services.graph_db import GraphDB
 from csa.utils.logger import get_logger
+from csa.utils.loc_calculator import calculate_loc
+from csa.utils.cognitive_complexity import calculate_class_cognitive_complexity
 from .config import extract_config_files
 from .jpa import (
     analyze_jpa_entity_table_mapping,
@@ -159,6 +161,16 @@ def parse_inner_classes(
                 inner_source = ""  # DTO inner class는 소스 저장 안 함
                 logger.debug(f"DTO inner 소스 저장 건너뜀: {inner_class_full_name}")
 
+            # Inner class LOC 메트릭 계산
+            inner_loc_metrics = calculate_loc(inner_class_source)
+
+            # Inner class Cognitive Complexity 계산
+            inner_cognitive_complexity = 0
+            try:
+                inner_cognitive_complexity = calculate_class_cognitive_complexity(inner_class_source)
+            except Exception as e:
+                logger.debug(f"Inner class Cognitive Complexity 계산 실패 ({inner_class_full_name}): {e}")
+
             # Inner class 노드 생성
             inner_class_node = Class(
                 name=inner_class_full_name,
@@ -172,7 +184,11 @@ def parse_inner_classes(
                 project_name=project_name,
                 description=inner_class_description if inner_class_description else "",
                 ai_description="",
-                bxm_category=inner_class_logical_name if inner_class_logical_name else ""
+                bxm_category=inner_class_logical_name if inner_class_logical_name else "",
+                PLOC=inner_loc_metrics.ploc,
+                LLOC=inner_loc_metrics.lloc,
+                CLOC=inner_loc_metrics.cloc,
+                cognitive_complexity=inner_cognitive_complexity
             )
 
             # imports 추가
@@ -373,6 +389,16 @@ def parse_single_java_file(file_path: str, project_name: str, graph_db: GraphDB 
             class_source = ""  # DTO 클래스는 소스 저장 안 함
             logger.debug(f"DTO 소스 저장 건너뜀: {class_name}")
 
+        # LOC 메트릭 계산
+        loc_metrics = calculate_loc(file_content)
+
+        # Cognitive Complexity 계산
+        cognitive_complexity = 0
+        try:
+            cognitive_complexity = calculate_class_cognitive_complexity(file_content)
+        except Exception as e:
+            logger.debug(f"Cognitive Complexity 계산 실패 ({class_name}): {e}")
+
         class_node = Class(
             name=class_name,
             logical_name=class_logical_name if class_logical_name else "",
@@ -385,7 +411,11 @@ def parse_single_java_file(file_path: str, project_name: str, graph_db: GraphDB 
             project_name=project_name,
             description=class_description if class_description else "",
             ai_description=ai_description,
-            bxm_category=class_logical_name if class_logical_name else ""
+            bxm_category=class_logical_name if class_logical_name else "",
+            PLOC=loc_metrics.ploc,
+            LLOC=loc_metrics.lloc,
+            CLOC=loc_metrics.cloc,
+            cognitive_complexity=cognitive_complexity
         )
 
         # imports 추가
@@ -728,6 +758,16 @@ def parse_java_project_full(directory: str, graph_db: GraphDB = None) -> tuple[l
                             from csa.parsers.java.description import extract_class_description_from_annotations
                             class_description = extract_class_description_from_annotations(class_annotations) or ""
 
+                            # LOC 메트릭 계산
+                            loc_metrics = calculate_loc(file_content)
+
+                            # Cognitive Complexity 계산
+                            cognitive_complexity = 0
+                            try:
+                                cognitive_complexity = calculate_class_cognitive_complexity(file_content)
+                            except Exception as e:
+                                logger.debug(f"Cognitive Complexity 계산 실패 ({class_name}): {e}")
+
                             classes[class_key] = Class(
                                 name=class_name,
                                 logical_name=class_logical_name if class_logical_name else "",
@@ -740,7 +780,11 @@ def parse_java_project_full(directory: str, graph_db: GraphDB = None) -> tuple[l
                                 project_name=project_name,
                                 description=class_description if class_description else "",
                                 ai_description="",
-                                bxm_category=class_logical_name if class_logical_name else ""
+                                bxm_category=class_logical_name if class_logical_name else "",
+                                PLOC=loc_metrics.ploc,
+                                LLOC=loc_metrics.lloc,
+                                CLOC=loc_metrics.cloc,
+                                cognitive_complexity=cognitive_complexity
                             )
                             class_to_package_map[class_key] = package_name
                             logger.debug(f"Successfully added class to classes dict: {class_name} (key: {class_key})")
