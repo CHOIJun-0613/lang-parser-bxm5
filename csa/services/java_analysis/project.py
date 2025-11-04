@@ -3,6 +3,7 @@ Java project parsing orchestration helpers.
 """
 from __future__ import annotations
 
+import gc
 import os
 import re
 import time
@@ -150,6 +151,14 @@ def parse_inner_classes(
             from csa.parsers.java.description import extract_class_description_from_annotations
             inner_class_description = extract_class_description_from_annotations(inner_class_annotations) or ""
 
+            # DTO 클래스 소스 저장 여부 결정 (환경 변수로 제어)
+            skip_dto_source = os.getenv("SKIP_DTO_SOURCE", "false").lower() == "true"
+            inner_source = inner_class_source
+
+            if skip_dto_source and is_dto_class(body_item.name, file_path):
+                inner_source = ""  # DTO inner class는 소스 저장 안 함
+                logger.debug(f"DTO inner 소스 저장 건너뜀: {inner_class_full_name}")
+
             # Inner class 노드 생성
             inner_class_node = Class(
                 name=inner_class_full_name,
@@ -157,7 +166,7 @@ def parse_inner_classes(
                 file_path=file_path,
                 type="class",
                 sub_type="inner_class",
-                source=inner_class_source,
+                source=inner_source,
                 annotations=inner_class_annotations,
                 package_name=package_name,
                 project_name=project_name,
@@ -356,13 +365,21 @@ def parse_single_java_file(file_path: str, project_name: str, graph_db: GraphDB 
                 logger.warning(f"AI Class 분석 실패 ({class_name}): {e}")
                 ai_description = ""
 
+        # DTO 클래스 소스 저장 여부 결정 (환경 변수로 제어)
+        skip_dto_source = os.getenv("SKIP_DTO_SOURCE", "false").lower() == "true"
+        class_source = file_content
+
+        if skip_dto_source and is_dto_class(class_name, file_path):
+            class_source = ""  # DTO 클래스는 소스 저장 안 함
+            logger.debug(f"DTO 소스 저장 건너뜀: {class_name}")
+
         class_node = Class(
             name=class_name,
             logical_name=class_logical_name if class_logical_name else "",
             file_path=file_path,
             type=class_type,
             sub_type=sub_type,
-            source=file_content,
+            source=class_source,
             annotations=class_annotations,
             package_name=package_name,
             project_name=project_name,
@@ -409,9 +426,13 @@ def parse_single_java_file(file_path: str, project_name: str, graph_db: GraphDB 
                     else:
                         initial_value = str(declarator.initializer)
                 
-                # 필드 논리명 추출 시도
-                from csa.services.java_parser_addon_r001 import extract_java_field_logical_name
-                field_logical_name = extract_java_field_logical_name(file_content, declarator.name, project_name)
+                # 필드 논리명 추출 시도 (DTO는 건너뛰기)
+                skip_dto_source = os.getenv("SKIP_DTO_SOURCE", "false").lower() == "true"
+                if skip_dto_source and is_dto_class(class_name, file_path):
+                    field_logical_name = ""  # DTO 필드 논리명 추출 건너뛰기 (성능 최적화)
+                else:
+                    from csa.services.java_parser_addon_r001 import extract_java_field_logical_name
+                    field_logical_name = extract_java_field_logical_name(file_content, declarator.name, project_name)
                 
                 prop = Field(
                     name=declarator.name,
@@ -1024,6 +1045,160 @@ def parse_java_project_full(directory: str, graph_db: GraphDB = None) -> tuple[l
         project_name,
     )
 
+class AdaptiveBatchSizer:
+    """
+    동적 배치 크기 조정기
+
+    Neo4j 저장 성능에 따라 배치 크기를 자동으로 조정하여
+    최적의 처리 속도를 유지합니다.
+    """
+
+    def __init__(self, initial_size: int = 50, min_size: int = 20, max_size: int = 200):
+        """
+        Args:
+            initial_size: 초기 배치 크기
+            min_size: 최소 배치 크기
+            max_size: 최대 배치 크기
+        """
+        self.current_size = initial_size
+        self.min_size = min_size
+        self.max_size = max_size
+        self.save_times = []  # 최근 저장 시간 기록
+        self.history_limit = 5  # 최근 5회 저장 시간 추적
+
+    def adjust(self, save_time: float, batch_size: int) -> int:
+        """
+        저장 시간 기반 배치 크기 조정
+
+        Args:
+            save_time: 배치 저장에 소요된 시간(초)
+            batch_size: 현재 배치 크기
+
+        Returns:
+            int: 조정된 배치 크기
+        """
+        # 처리율 계산 (items/sec)
+        throughput = batch_size / save_time if save_time > 0 else 0
+
+        # 저장 시간 기록
+        self.save_times.append(save_time)
+        if len(self.save_times) > self.history_limit:
+            self.save_times.pop(0)
+
+        # 평균 저장 시간 계산
+        avg_save_time = sum(self.save_times) / len(self.save_times)
+
+        # 조정 전략
+        if avg_save_time < 5.0:
+            # 빠름: 배치 크기 증가 (10% 증가)
+            self.current_size = min(int(self.current_size * 1.1), self.max_size)
+        elif avg_save_time > 20.0:
+            # 느림: 배치 크기 감소 (20% 감소)
+            self.current_size = max(int(self.current_size * 0.8), self.min_size)
+        # 5~20초 사이면 현재 크기 유지
+
+        return int(self.current_size)
+
+    def get_current_size(self) -> int:
+        """현재 배치 크기 반환"""
+        return int(self.current_size)
+
+
+def estimate_file_complexity(file_path: str) -> int:
+    """
+    파일 복잡도 추정 (빠른 휴리스틱 분석)
+
+    복잡도가 높을수록 파싱 시간이 오래 걸리므로,
+    큰 파일을 먼저 워커에 배정하여 워크로드 불균형을 방지합니다.
+
+    Args:
+        file_path: Java 파일 경로
+
+    Returns:
+        int: 복잡도 점수 (높을수록 복잡)
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        # 라인 수
+        lines = content.count('\n')
+
+        # 필드 수 (private, public, protected 선언)
+        fields = content.count('private ') + content.count('public ') + content.count('protected ')
+
+        # 메서드 수 (메서드 선언 패턴)
+        methods = content.count('public ') + content.count('private ') + content.count('protected ')
+
+        # Inner class 수
+        inner_classes = content.count('static class ') + content.count('class ')
+
+        # 어노테이션 수 (@로 시작)
+        annotations = content.count('@')
+
+        # 복잡도 점수 계산 (가중치 적용)
+        complexity = (
+            lines * 1 +           # 라인당 1점
+            fields * 2 +          # 필드당 2점
+            methods * 5 +         # 메서드당 5점
+            inner_classes * 10 +  # Inner class당 10점
+            annotations * 1       # 어노테이션당 1점
+        )
+
+        return complexity
+    except Exception:
+        # 파일 읽기 실패 시 기본값 반환 (파일 크기 기반)
+        try:
+            return os.path.getsize(file_path) // 10
+        except:
+            return 0
+
+
+def is_dto_class(class_name: str, file_path: str = None) -> bool:
+    """
+    DTO 클래스 여부 판별
+
+    다음 조건 중 하나라도 만족하면 DTO로 판단:
+    1. 클래스명이 DTO/DODT/DIDT/VO/Entity/Grid 등으로 끝남
+    2. 파일 분석 시 필드만 많고 비즈니스 로직 메서드가 거의 없음
+
+    Args:
+        class_name: 클래스명
+        file_path: 파일 경로 (선택사항, 더 정확한 판별을 위해)
+
+    Returns:
+        bool: DTO 클래스 여부
+    """
+    # 1. 클래스명 패턴 체크
+    dto_suffixes = ['DTO', 'DODT', 'DIDT', 'ODT', 'IDT', 'VO', 'Entity', 'Grid', '_DTO', '_DODT', '_DIDT']
+    if any(class_name.endswith(suffix) for suffix in dto_suffixes):
+        return True
+
+    # 2. 파일 내용 기반 체크 (선택적)
+    if file_path and os.path.exists(file_path):
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            # 필드 수 카운트 (private, protected 필드)
+            field_count = content.count('private ') + content.count('protected ')
+
+            # 비즈니스 로직 메서드 수 (getter/setter 제외)
+            # public/private/protected 메서드에서 get/set으로 시작하지 않는 것들
+            total_methods = content.count('public ') + content.count('private ') + content.count('protected ')
+            getter_setter = content.count('public get') + content.count('public set') + \
+                           content.count('private get') + content.count('private set')
+            business_methods = max(0, (total_methods - field_count - getter_setter) // 2)
+
+            # DTO 판별: 필드 20개 이상 & 비즈니스 메서드 3개 이하
+            if field_count >= 20 and business_methods <= 3:
+                return True
+        except:
+            pass
+
+    return False
+
+
 def _parse_single_file_wrapper(file_path: str, project_name: str) -> tuple:
     """
     병렬 처리용 파싱 래퍼 함수 (Neo4j 연결 없이 파싱만 수행)
@@ -1104,6 +1279,7 @@ def parse_java_project_streaming(
     stats = {
         'total_files': 0,
         'processed_files': 0,
+        'skipped_files': 0,
         'packages': 0,
         'classes': 0,
         'beans': 0,
@@ -1138,10 +1314,62 @@ def parse_java_project_streaming(
     stats['total_files'] = total_files
     logger.info(f"총 {total_files}개 Java 파일 발견")
 
+    # 파일 복잡도 기반 정렬 (복잡한 파일을 먼저 처리 - 워크로드 균형 개선)
+    logger.info("파일 복잡도 분석 중...")
+    complexity_start = time.time()
+    file_complexities = [(f, estimate_file_complexity(f)) for f in java_files]
+
+    # 복잡도 임계값 설정 (환경 변수로 제어 가능, 기본값: 50000)
+    complexity_threshold = int(os.getenv("JAVA_COMPLEXITY_THRESHOLD", "50000"))
+
+    # 극단적으로 복잡한 파일 필터링
+    skipped_files = []
+    filtered_complexities = []
+    for file_path, complexity in file_complexities:
+        if complexity > complexity_threshold:
+            skipped_files.append((file_path, complexity))
+        else:
+            filtered_complexities.append((file_path, complexity))
+
+    # 건너뛴 파일 로깅
+    if skipped_files:
+        logger.warning(f"⚠️  복잡도 임계값({complexity_threshold}) 초과로 건너뛴 파일: {len(skipped_files)}개")
+        for file_path, complexity in skipped_files:
+            file_name = os.path.basename(file_path)
+            logger.warning(f"  - {file_name} (복잡도: {complexity})")
+
+    # 복잡도 높은 순으로 정렬 (큰 작업부터 워커에 배정)
+    filtered_complexities.sort(key=lambda x: x[1], reverse=True)
+    java_files = [f for f, _ in filtered_complexities]
+
+    # 통계 업데이트
+    total_files = len(java_files)
+    stats['total_files'] = total_files
+    stats['skipped_files'] = len(skipped_files)
+
+    complexity_elapsed = time.time() - complexity_start
+    logger.info(f"파일 복잡도 분석 완료 ({complexity_elapsed:.2f}초)")
+    logger.info(f"분석 대상: {total_files}개 (건너뜀: {len(skipped_files)}개)")
+
+    # 상위 10개 복잡한 파일 로깅 (필터링 후)
+    top_complex_files = filtered_complexities[:10]
+    logger.info("복잡도 상위 10개 파일:")
+    for i, (file_path, complexity) in enumerate(top_complex_files, 1):
+        file_name = os.path.basename(file_path)
+        logger.info(f"  {i}. {file_name} (복잡도: {complexity})")
+
     # 환경 변수에서 병렬 워커 수 가져오기 (기본값 8)
     parallel_workers = int(os.getenv("JAVA_PARSE_WORKERS", str(parallel_workers)))
-    batch_size = int(os.getenv("NEO4J_BATCH_SIZE", "50"))  # 배치 크기
-    logger.info(f"병렬 파싱 워커 수: {parallel_workers}, Neo4j 배치 크기: {batch_size}")
+    initial_batch_size = int(os.getenv("NEO4J_BATCH_SIZE", "50"))  # 초기 배치 크기
+
+    # 동적 배치 크기 조정기 초기화
+    batch_sizer = AdaptiveBatchSizer(
+        initial_size=initial_batch_size,
+        min_size=20,
+        max_size=200
+    )
+
+    logger.info(f"병렬 파싱 워커 수: {parallel_workers}, 초기 배치 크기: {initial_batch_size} (동적 조정 활성화)")
 
     # 0. Package 사전 생성 (성능 최적화)
     logger.info("Package 정보 수집 중...")
@@ -1179,8 +1407,9 @@ def parse_java_project_streaming(
     last_batch_save_time = time.time()  # 마지막 배치 저장 시간
     batch_save_interval = 10.0  # 10초마다 배치 저장 (버퍼에 데이터가 있을 경우)
 
-    # 타임아웃 설정 (파일당 최대 10초로 단축)
-    file_timeout = 10.0
+    # 타임아웃 설정 (환경 변수로 제어 가능, 기본값: 60초)
+    file_timeout = float(os.getenv("JAVA_FILE_PARSE_TIMEOUT", "60.0"))
+    logger.info(f"파일 파싱 타임아웃: {file_timeout}초")
 
     with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
         # 모든 파일을 병렬로 파싱 제출
@@ -1254,8 +1483,9 @@ def parse_java_project_streaming(
 
                     # 배치 저장 조건: 크기 도달 OR 마지막 파일 OR 시간 경과
                     time_since_last_save = current_time - last_batch_save_time
+                    current_batch_size = batch_sizer.get_current_size()
                     should_save_batch = (
-                        len(parsed_buffer) >= batch_size or  # 배치 크기 도달
+                        len(parsed_buffer) >= current_batch_size or  # 동적 배치 크기 도달
                         processed_classes == total_files or  # 마지막 파일
                         (len(parsed_buffer) > 0 and time_since_last_save >= batch_save_interval)  # 시간 경과
                     )
@@ -1333,7 +1563,17 @@ def parse_java_project_streaming(
                             stats['processed_files'] += len(batch_to_save)
 
                         batch_elapsed = time.time() - batch_start_time
+
+                        # 배치 크기 동적 조정
+                        new_batch_size = batch_sizer.adjust(batch_elapsed, len(batch_to_save))
+                        if new_batch_size != current_batch_size:
+                            logger.info(f"  📊 배치 크기 조정: {current_batch_size} → {new_batch_size}")
+
                         logger.info(f"  ← 배치 저장 완료 ({batch_elapsed:.2f}초)")
+
+                        # 메모리 명시적 해제 (배치 저장 후)
+                        del batch_to_save
+                        gc.collect()
 
                     except Exception as batch_error:
                         logger.error(f"배치 저장 실패: {batch_error}")
