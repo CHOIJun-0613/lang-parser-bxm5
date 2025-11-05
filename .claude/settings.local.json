@@ -16,7 +16,9 @@
       "Bash(.venv/Scripts/python.exe:*)",
       "Bash(del \"d:\\workspaces\\lang-parser-work\\lang-parser-bxm5\\docs\\CLI option과 환경변수 관계(2025-11-05).md\")",
       "Bash(.venvScriptspython.exe -m pytest tests/unit/test_method_complexity.py -v)",
-      "Bash(type \"Java 파일 복잡도 산정(2025-11-04).md\")"
+      "Bash(type \"Java 파일 복잡도 산정(2025-11-04).md\")",
+      "Bash(.venvScriptspython.exe -m pytest tests/unit/test_class_subtype.py -v)",
+      "Bash(d:workspaceslang-parser-worklang-parser-bxm5.venvScriptspython.exe -m pytest tests/unit/test_class_subtype.py -v)"
     ],
     "deny": [],
     "ask": []

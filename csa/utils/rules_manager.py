@@ -27,6 +27,7 @@ class RulesManager:
         self.rules_directory = "rules"
         self._logical_name_rules: Dict[str, Dict[str, Any]] = {}
         self._description_rules: Dict[str, Dict[str, Any]] = {}
+        self._class_subtype_rules: Dict[str, Dict[str, Any]] = {}
         self._rules_loaded = False  # 규칙 로드 여부 플래그
         self._initialized = True
 
@@ -48,14 +49,17 @@ class RulesManager:
     def _load_all_rules(self):
         """모든 규칙 파일을 한 번에 로드"""
         self.logger.info("규칙 파일들을 로드 중...")
-        
+
         # 논리명 추출 규칙들 로드
         self._load_logical_name_rules()
-        
-        # Description 추출 규칙들 로드  
+
+        # Description 추출 규칙들 로드
         self._load_description_rules()
-        
-        self.logger.info(f"규칙 로드 완료 - 논리명: {len(self._logical_name_rules)}개, Description: {len(self._description_rules)}개")
+
+        # Class sub-type 추출 규칙들 로드
+        self._load_class_subtype_rules()
+
+        self.logger.info(f"규칙 로드 완료 - 논리명: {len(self._logical_name_rules)}개, Description: {len(self._description_rules)}개, Class Subtype: {len(self._class_subtype_rules)}개")
     
     def _load_logical_name_rules(self):
         """논리명 추출 규칙들 로드"""
@@ -150,7 +154,7 @@ class RulesManager:
         try:
             with open(rule_file, 'r', encoding='utf-8') as f:
                 content = f.read()
-            
+
             # 현재는 고정 규칙 사용
             rules = {
                 "class": {
@@ -164,12 +168,60 @@ class RulesManager:
                     "description": "Method의 @Operation annotation의 description 파라미터에서 추출"
                 }
             }
-            
+
             self.logger.debug(f"Description 규칙 로드: {rule_file}")
             return rules
-            
+
         except Exception as e:
             self.logger.error(f"Description 규칙 파일 로드 실패: {rule_file}, {e}")
+            return {}
+
+    def _load_class_subtype_rules(self):
+        """Class sub-type 추출 규칙들 로드"""
+        rule_file = f"{self.rules_directory}/rule003_extraction_class_subtype.md"
+        if os.path.exists(rule_file):
+            self._class_subtype_rules["default"] = self._parse_class_subtype_rules(rule_file)
+
+    def _parse_class_subtype_rules(self, rule_file: str) -> Dict[str, Any]:
+        """Class sub-type 규칙 파일 파싱"""
+        try:
+            with open(rule_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            # rule003에 정의된 고정 규칙
+            rules = {
+                "controller": {
+                    "annotations": ["RestController", "Controller"],
+                    "description": "Controller 클래스 타입 (@RestController 또는 @Controller)"
+                },
+                "service": {
+                    "annotations": ["Service"],
+                    "description": "Service 클래스 타입 (@Service)"
+                },
+                "component": {
+                    "annotations": ["Component"],
+                    "description": "Component 클래스 타입 (@Component)"
+                },
+                "dbio": {
+                    "annotations": ["BxmDataAccess"],
+                    "description": "DBM 클래스 타입 (@BxmDataAccess)"
+                },
+                "dto": {
+                    "annotations": ["XmlType", "XmlRootElement"],
+                    "condition": "all",  # 모든 annotation이 있어야 함
+                    "description": "DTO 클래스 타입 (@XmlType + @XmlRootElement)"
+                },
+                "utility": {
+                    "annotations": [],
+                    "description": "기본값 (위 조건에 해당하지 않는 클래스)"
+                }
+            }
+
+            self.logger.debug(f"Class sub-type 규칙 로드: {rule_file}")
+            return rules
+
+        except Exception as e:
+            self.logger.error(f"Class sub-type 규칙 파일 로드 실패: {rule_file}, {e}")
             return {}
     
     def _extract_template_from_line(self, line: str) -> str:
@@ -220,11 +272,17 @@ class RulesManager:
         self._ensure_rules_loaded()  # 첫 사용 시 로드
         return self._description_rules.get(project_name, self._description_rules.get("default", {}))
 
+    def get_class_subtype_rules(self, project_name: str) -> Dict[str, Any]:
+        """프로젝트별 Class sub-type 규칙 반환"""
+        self._ensure_rules_loaded()  # 첫 사용 시 로드
+        return self._class_subtype_rules.get(project_name, self._class_subtype_rules.get("default", {}))
+
     def reload_rules(self):
         """규칙 파일들 재로드 (개발 중 규칙 변경 시 사용)"""
         self.logger.info("규칙 파일들 재로드 중...")
         self._logical_name_rules.clear()
         self._description_rules.clear()
+        self._class_subtype_rules.clear()
         self._rules_loaded = False
         self._ensure_rules_loaded()  # 즉시 재로드
 

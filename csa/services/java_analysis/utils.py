@@ -27,89 +27,28 @@ def extract_project_name(java_source_folder: str) -> str:
 
 def extract_sub_type(package_name: str, class_name: str, annotations: list[Annotation]) -> str:
     """
-    패키지명과 클래스명, 어노테이션을 기반으로 sub_type을 추출합니다.
-    
+    rule003 기반으로 클래스의 sub_type을 추출합니다.
+
+    rule003에 따라 다음 순서로 sub-type 판별:
+    1. @RestController 또는 @Controller -> "controller"
+    2. @Service -> "service"
+    3. @Component -> "component"
+    4. @BxmDataAccess -> "dbio"
+    5. @XmlType + @XmlRootElement -> "dto"
+    6. 위 조건에 해당하지 않으면 -> "utility"
+
     Args:
-        package_name: 패키지명
-        class_name: 클래스명
+        package_name: 패키지명 (사용하지 않음, 하위 호환성을 위해 유지)
+        class_name: 클래스명 (사용하지 않음, 하위 호환성을 위해 유지)
         annotations: 클래스 어노테이션 리스트
-        
+
     Returns:
-        sub_type (controller, service, util, dto, config, mapper, repository, entity, exception, client)
+        sub_type (controller, service, component, dbio, dto, utility)
     """
-    # 패키지명의 마지막 단어 추출
-    package_parts = package_name.split('.')
-    last_package_part = package_parts[-1].lower() if package_parts else ""
-    
-    # 어노테이션 기반 판단
-    annotation_names = [ann.name.lower() for ann in annotations]
-    
-    # Controller 판단
-    if any(ann in annotation_names for ann in ['@controller', '@restcontroller', '@controlleradvice']):
-        return 'controller'
-    
-    # Service 판단
-    if any(ann in annotation_names for ann in ['@service', '@component']):
-        return 'service'
-    
-    # Repository 판단
-    if any(ann in annotation_names for ann in ['@repository', '@mapper']):
-        return 'repository'
-    
-    # Entity 판단
-    if any(ann in annotation_names for ann in ['@entity', '@table', '@mappedsuperclass']):
-        return 'entity'
-    
-    # Configuration 판단
-    if any(ann in annotation_names for ann in ['@configuration', '@config', '@enableautoconfiguration']):
-        return 'config'
-    
-    # 패키지명 기반 판단
-    if last_package_part in ['controller', 'controllers']:
-        return 'controller'
-    elif last_package_part in ['service', 'services']:
-        return 'service'
-    elif last_package_part in ['util', 'utils', 'utility']:
-        return 'util'
-    elif last_package_part in ['dto', 'dtos', 'model', 'models']:
-        return 'dto'
-    elif last_package_part in ['config', 'configuration']:
-        return 'config'
-    elif last_package_part in ['mapper', 'mappers']:
-        return 'mapper'
-    elif last_package_part in ['repository', 'repositories']:
-        return 'repository'
-    elif last_package_part in ['entity', 'entities', 'domain']:
-        return 'entity'
-    elif last_package_part in ['exception', 'exceptions']:
-        return 'exception'
-    elif last_package_part in ['client', 'clients']:
-        return 'client'
-    
-    # 클래스명 기반 판단 (fallback)
-    class_name_lower = class_name.lower()
-    if class_name_lower.endswith('controller'):
-        return 'controller'
-    elif class_name_lower.endswith('service'):
-        return 'service'
-    elif class_name_lower.endswith('util') or class_name_lower.endswith('utils'):
-        return 'util'
-    elif class_name_lower.endswith('dto') or class_name_lower.endswith('request') or class_name_lower.endswith('response'):
-        return 'dto'
-    elif class_name_lower.endswith('config') or class_name_lower.endswith('configuration'):
-        return 'config'
-    elif class_name_lower.endswith('mapper'):
-        return 'mapper'
-    elif class_name_lower.endswith('repository'):
-        return 'repository'
-    elif class_name_lower.endswith('entity'):
-        return 'entity'
-    elif class_name_lower.endswith('exception'):
-        return 'exception'
-    elif class_name_lower.endswith('client'):
-        return 'client'
-    
-    return ""
+    # rule003 기반 subtype 추출 함수 사용
+    from csa.parsers.java.class_subtype import extract_class_subtype_from_annotations
+
+    return extract_class_subtype_from_annotations(annotations, project_name=None)
 
 __all__ = [
     "classify_springboot_annotation",
