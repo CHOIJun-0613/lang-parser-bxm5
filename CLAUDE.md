@@ -200,10 +200,10 @@ Neo4j 데이터 쿼리
 output/sequence-diagram/ 에 저장
 ```
 
-#### 6. **AI 분석 2-Phase 아키텍처 (성능 최적화)**
+#### 6. **AI 분석 아키텍처**
 ```
-Phase 1: 빠른 파싱 (--skip-ai 옵션)
-analyze 명령어 → SKIP_AI_ANALYSIS=true 설정
+Option 1: AI 분석 없이 빠른 파싱 (기본값)
+analyze 명령어 (--use-ai 옵션 없음)
     ↓
 Java/DB 파싱 (AI 분석 건너뜀)
     ↓
@@ -211,7 +211,16 @@ Neo4j에 저장 (ai_description은 빈 문자열)
     ↓
 파싱 완료 (빠른 속도)
 
-Phase 2: AI Enrichment (선택적 실행)
+Option 2: AI 분석 포함 파싱 (--use-ai 옵션)
+analyze 명령어 --use-ai
+    ↓
+Java/DB 파싱 + 실시간 AI 분석
+    ↓
+Neo4j에 저장 (ai_description 포함)
+    ↓
+파싱 완료 (느림, LLM API 호출 포함)
+
+Option 3: AI Enrichment (사후 AI 분석)
 ai-enrich 명령어
     ↓
 Neo4j에서 ai_description 없는 노드 조회
@@ -225,11 +234,10 @@ Neo4j에서 ai_description 없는 노드 조회
 Neo4j 업데이트 (ai_description 채움)
 ```
 
-**장점:**
-- 파싱 속도 향상 (LLM API 호출 제거)
-- 더 나은 LLM 모델 사용 가능 (성능 영향 없음)
-- 필요한 노드만 선택적 AI 분석
-- Rate Limit 회피 (배치 크기 조절)
+**권장 사용 시나리오:**
+- **빠른 개발**: Option 1 (기본) → 필요시 Option 3
+- **완전 자동화**: Option 2 (파싱과 AI 분석 동시)
+- **선택적 AI**: Option 1 → ai-enrich로 특정 노드만 처리
 
 ### Neo4j 그래프 모델
 
@@ -280,8 +288,7 @@ USE_STREAMING_PARSE=true                # 스트리밍 모드 활성화 (대규�
 JAVA_PARSE_WORKERS=8                    # 병렬 워커 수 (기본값: 8)
 
 # AI 분석 설정 (선택사항)
-AI_USE_ANALYSIS=true                    # AI 분석 활성화 (기본값: false)
-SKIP_AI_ANALYSIS=false                  # AI 분석 건너뛰기 (--skip-ai 옵션으로도 설정 가능)
+USE_AI_ANALYSIS=true                    # AI 분석 시스템 활성화 (기본값: false)
 CONCURRENT_AI_REQUESTS=10               # AI enrichment 동시 요청 수 (기본값: 10, 로컬: 10-20, 클라우드: 5-10)
 AI_PROVIDER=lmstudio                    # AI provider (google, groq, lmstudio, openai)
 
@@ -315,8 +322,8 @@ python -m csa.cli.main analyze --java-object --dry-run
 # 병렬 처리 워커 수 지정
 python -m csa.cli.main analyze --all-objects --project-name myproject
 
-# AI 분석 건너뛰기 (빠른 파싱, Phase 1)
-python -m csa.cli.main analyze --all-objects --clean --skip-ai --project-name myproject
+# AI 분석 포함 (느림)
+python -m csa.cli.main analyze --all-objects --clean --use-ai --project-name myproject
 ```
 
 **옵션 설명:**
@@ -325,7 +332,7 @@ python -m csa.cli.main analyze --all-objects --clean --skip-ai --project-name my
 - `--db-object`: DB 스키마만 분석
 - `--clean`: 기존 프로젝트 노드 삭제 후 재분석
 - `--update`: 기존 데이터 유지하고 새로운 항목만 추가
-- `--skip-ai`: AI 분석 건너뛰기 (빠른 파싱, 나중에 ai-enrich로 보완)
+- `--use-ai`: AI 분석 포함 (느림, 나중에 ai-enrich로 보완 가능)
 - 병렬 처리는 `.env`의 `JAVA_PARSE_WORKERS` 등 환경 변수로 제어합니다.
 - `--class-name <이름>`: 특정 클래스만 분석
 - `--project-name <이름>`: Neo4j에 저장할 프로젝트명
@@ -364,9 +371,9 @@ python -m csa.cli.main ai-enrich --project-name myproject --concurrent 15
 - `--batch-size`: (deprecated) --concurrent 사용 권장
 
 **사용 시나리오:**
-1. Phase 1: `analyze --skip-ai`로 빠르게 파싱
-2. Phase 2: `ai-enrich`로 선택적으로 AI 설명 추가
-3. Rate Limit 발생 시 `--batch-size`로 조절하여 재시도
+1. 빠른 파싱: `analyze` (AI 분석 없음, 기본값)
+2. AI enrichment: `ai-enrich`로 선택적으로 AI 설명 추가
+3. Rate Limit 발생 시 `--concurrent`로 조절하여 재시도
 
 ### 시퀀스 다이어그램 생성
 

@@ -52,7 +52,7 @@ def test_ai_analyzer_initialization():
         print("✅ AI Analyzer 초기화 성공")
     else:
         print("⚠️  AI Analyzer가 비활성화되어 있습니다.")
-        print("   .env 파일에서 AI_USE_ANALYSIS=true로 설정하고 API 키를 입력하세요.")
+        print("   .env 파일에서 USE_AI_ANALYSIS=true로 설정하고 API 키를 입력하세요.")
     print()
 
 

@@ -31,8 +31,9 @@ from csa.models.graph_entities import (
 )
 from csa.services.graph_db import GraphDB
 from csa.utils.logger import get_logger
-from csa.utils.loc_calculator import calculate_loc
-from csa.utils.cognitive_complexity import calculate_class_cognitive_complexity
+from csa.utils.loc_calculator import calculate_loc, LOCMetrics
+from csa.utils.cognitive_complexity import calculate_method_cognitive_complexity
+from csa.utils.code_complexity import calculate_code_complexity_from_class_node
 from .config import extract_config_files
 from .jpa import (
     analyze_jpa_entity_table_mapping,
@@ -164,14 +165,7 @@ def parse_inner_classes(
             # Inner class LOC 메트릭 계산
             inner_loc_metrics = calculate_loc(inner_class_source)
 
-            # Inner class Cognitive Complexity 계산
-            inner_cognitive_complexity = 0
-            try:
-                inner_cognitive_complexity = calculate_class_cognitive_complexity(inner_class_source)
-            except Exception as e:
-                logger.debug(f"Inner class Cognitive Complexity 계산 실패 ({inner_class_full_name}): {e}")
-
-            # Inner class 노드 생성
+            # Inner class 노드 생성 (code_complexity는 나중에 계산)
             inner_class_node = Class(
                 name=inner_class_full_name,
                 logical_name=inner_class_logical_name if inner_class_logical_name else "",
@@ -188,7 +182,7 @@ def parse_inner_classes(
                 PLOC=inner_loc_metrics.ploc,
                 LLOC=inner_loc_metrics.lloc,
                 CLOC=inner_loc_metrics.cloc,
-                cognitive_complexity=inner_cognitive_complexity
+                code_complexity=0  # 메서드와 필드 추가 후 재계산
             )
 
             # imports 추가
@@ -293,16 +287,42 @@ def parse_inner_classes(
 
                         method_source = "".join(lines[start_line:end_line + 1])
 
+                    # DTO inner class 메서드는 복잡도 측정 건너뛰기
+                    skip_dto_source = os.getenv("SKIP_DTO_SOURCE", "false").lower() == "true"
+                    is_dto = skip_dto_source and is_dto_class(body_item.name, file_path)
+
+                    # Inner class 메서드 LOC 메트릭 계산
+                    inner_method_loc_metrics = calculate_loc(method_source) if method_source and not is_dto else LOCMetrics(0, 0, 0)
+
+                    # Inner class 메서드 Cognitive Complexity 계산
+                    inner_method_cognitive_complexity = 0
+                    if method_source and not is_dto:
+                        try:
+                            inner_method_cognitive_complexity = calculate_method_cognitive_complexity(method_declaration)
+                        except Exception as e:
+                            logger.debug(f"Inner class 메서드 Cognitive Complexity 계산 실패 ({inner_class_full_name}.{method_name}): {e}")
+
                     method = Method(
                         name=method_name,
                         return_type=return_type,
                         annotations=method_annotations,
                         parameters=parameters,
                         modifiers=modifiers,
-                        source=method_source
+                        source=method_source,
+                        PLOC=inner_method_loc_metrics.ploc,
+                        LLOC=inner_method_loc_metrics.lloc,
+                        CLOC=inner_method_loc_metrics.cloc,
+                        cognitive_complexity=inner_method_cognitive_complexity
                     )
 
                     inner_class_node.methods.append(method)
+
+            # Inner class code_complexity 계산
+            try:
+                inner_class_node.code_complexity = calculate_code_complexity_from_class_node(inner_class_node)
+            except Exception as e:
+                logger.debug(f"Inner class code_complexity 계산 실패 ({inner_class_full_name}): {e}")
+                inner_class_node.code_complexity = 0
 
             inner_classes.append(inner_class_node)
 
@@ -392,13 +412,6 @@ def parse_single_java_file(file_path: str, project_name: str, graph_db: GraphDB 
         # LOC 메트릭 계산
         loc_metrics = calculate_loc(file_content)
 
-        # Cognitive Complexity 계산
-        cognitive_complexity = 0
-        try:
-            cognitive_complexity = calculate_class_cognitive_complexity(file_content)
-        except Exception as e:
-            logger.debug(f"Cognitive Complexity 계산 실패 ({class_name}): {e}")
-
         class_node = Class(
             name=class_name,
             logical_name=class_logical_name if class_logical_name else "",
@@ -415,7 +428,7 @@ def parse_single_java_file(file_path: str, project_name: str, graph_db: GraphDB 
             PLOC=loc_metrics.ploc,
             LLOC=loc_metrics.lloc,
             CLOC=loc_metrics.cloc,
-            cognitive_complexity=cognitive_complexity
+            code_complexity=0  # 메서드와 필드 추가 후 재계산
         )
 
         # imports 추가
@@ -556,7 +569,22 @@ def parse_single_java_file(file_path: str, project_name: str, graph_db: GraphDB 
                             method_name=declaration.name,
                             class_name=class_name
                         )
-    
+
+                # DTO 클래스 메서드는 복잡도 측정 건너뛰기
+                skip_dto_source = os.getenv("SKIP_DTO_SOURCE", "false").lower() == "true"
+                is_dto = skip_dto_source and is_dto_class(class_name, file_path)
+
+                # 메서드 LOC 메트릭 계산
+                method_loc_metrics = calculate_loc(method_source) if method_source and not is_dto else LOCMetrics(0, 0, 0)
+
+                # 메서드 Cognitive Complexity 계산
+                method_cognitive_complexity = 0
+                if method_source and not is_dto:
+                    try:
+                        method_cognitive_complexity = calculate_method_cognitive_complexity(declaration)
+                    except Exception as e:
+                        logger.debug(f"메서드 Cognitive Complexity 계산 실패 ({class_name}.{declaration.name}): {e}")
+
                 method = Method(
                     name=declaration.name,
                     logical_name=method_logical_name if method_logical_name else "",
@@ -568,7 +596,11 @@ def parse_single_java_file(file_path: str, project_name: str, graph_db: GraphDB 
                     annotations=method_annotations,
                     description=method_description if method_description else "",
                     ai_description=method_ai_description,
-                    calls=[]  # 명시적으로 calls 속성 초기화
+                    calls=[],  # 명시적으로 calls 속성 초기화
+                    PLOC=method_loc_metrics.ploc,
+                    LLOC=method_loc_metrics.lloc,
+                    CLOC=method_loc_metrics.cloc,
+                    cognitive_complexity=method_cognitive_complexity
                 )
                 
                 # 메서드 호출 분석 - MethodCall 객체 생성
@@ -655,6 +687,13 @@ def parse_single_java_file(file_path: str, project_name: str, graph_db: GraphDB 
             project_name,
             import_map
         )
+
+        # Class code_complexity 계산 (메서드와 필드 추가 완료 후)
+        try:
+            class_node.code_complexity = calculate_code_complexity_from_class_node(class_node)
+        except Exception as e:
+            logger.debug(f"Class code_complexity 계산 실패 ({class_name}): {e}")
+            class_node.code_complexity = 0
 
         logger.debug(f"Successfully parsed single file: {file_path} (found {len(inner_classes)} inner classes)")
         return package_node, class_node, inner_classes, package_name
@@ -761,13 +800,6 @@ def parse_java_project_full(directory: str, graph_db: GraphDB = None) -> tuple[l
                             # LOC 메트릭 계산
                             loc_metrics = calculate_loc(file_content)
 
-                            # Cognitive Complexity 계산
-                            cognitive_complexity = 0
-                            try:
-                                cognitive_complexity = calculate_class_cognitive_complexity(file_content)
-                            except Exception as e:
-                                logger.debug(f"Cognitive Complexity 계산 실패 ({class_name}): {e}")
-
                             classes[class_key] = Class(
                                 name=class_name,
                                 logical_name=class_logical_name if class_logical_name else "",
@@ -784,7 +816,7 @@ def parse_java_project_full(directory: str, graph_db: GraphDB = None) -> tuple[l
                                 PLOC=loc_metrics.ploc,
                                 LLOC=loc_metrics.lloc,
                                 CLOC=loc_metrics.cloc,
-                                cognitive_complexity=cognitive_complexity
+                                code_complexity=0  # 메서드와 필드 추가 후 재계산
                             )
                             class_to_package_map[class_key] = package_name
                             logger.debug(f"Successfully added class to classes dict: {class_name} (key: {class_key})")

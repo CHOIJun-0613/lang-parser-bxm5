@@ -15,8 +15,8 @@ class AIConfig:
     """AI Provider 설정 클래스"""
     
     def __init__(self):
-        # AI 분석 사용 여부 설정
-        self.ai_use_analysis = os.getenv("AI_USE_ANALYSIS", "false").lower() == "true"
+        # AI 분석 시스템 활성화 여부 설정
+        self.ai_use_analysis = os.getenv("USE_AI_ANALYSIS", "false").lower() == "true"
 
         # AI Provider 설정 (google, groq, lmstudio, openai)
         self.ai_provider = os.getenv("AI_PROVIDER", "google").lower()

@@ -25,9 +25,9 @@ class AIAnalyzer:
         self._llm = None
         self._is_available = False
 
-        # AI 사용 여부 확인
+        # AI 분석 시스템 활성화 여부 확인
         if not self.config.ai_use_analysis:
-            logger.info("AI 분석이 비활성화되어 있습니다 (AI_USE_ANALYSIS=false)")
+            logger.info("AI 분석이 비활성화되어 있습니다 (USE_AI_ANALYSIS=false)")
             return
 
         # LLM 초기화 시도

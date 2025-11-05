@@ -30,7 +30,7 @@ def main():
 
         if not analyzer.is_available():
             print("[ERROR] AI Analyzer를 사용할 수 없습니다.")
-            print("  - .env 파일의 AI_USE_ANALYSIS=true 설정을 확인하세요.")
+            print("  - .env 파일의 USE_AI_ANALYSIS=true 설정을 확인하세요.")
             print("  - API 키가 올바르게 설정되었는지 확인하세요.")
             return False
 

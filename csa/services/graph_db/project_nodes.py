@@ -231,7 +231,7 @@ class ProjectMixin:
             "c.imports = $imports, c.package_name = $package_name, "
             "c.project_name = $project_name, c.description = $description, c.ai_description = $ai_description, "
             "c.updated_at = $updated_at, "
-            "c.PLOC = $PLOC, c.LLOC = $LLOC, c.CLOC = $CLOC, c.cognitive_complexity = $cognitive_complexity"
+            "c.PLOC = $PLOC, c.LLOC = $LLOC, c.CLOC = $CLOC, c.code_complexity = $code_complexity"
         )
         tx.run(
             class_query,
@@ -252,7 +252,7 @@ class ProjectMixin:
             PLOC=int(class_node.PLOC or 0),
             LLOC=int(class_node.LLOC or 0),
             CLOC=int(class_node.CLOC or 0),
-            cognitive_complexity=int(class_node.cognitive_complexity or 0),
+            code_complexity=int(class_node.code_complexity or 0),
         )
         if package_name:
             package_class_query = (
@@ -459,6 +459,10 @@ class ProjectMixin:
                     "ai_description": getattr(method, "ai_description", "") or "",
                     "logical_name": getattr(method, "logical_name", "") or "",
                     "source": getattr(method, "source", "") or "",
+                    "PLOC": getattr(method, "PLOC", 0),
+                    "LLOC": getattr(method, "LLOC", 0),
+                    "CLOC": getattr(method, "CLOC", 0),
+                    "cognitive_complexity": getattr(method, "cognitive_complexity", 0),
                     "updated_at": current_timestamp,
                 }
             )
@@ -535,6 +539,10 @@ class ProjectMixin:
                     meth.source = m.source,
                     meth.package_name = m.package_name,
                     meth.project_name = m.project_name,
+                    meth.PLOC = m.PLOC,
+                    meth.LLOC = m.LLOC,
+                    meth.CLOC = m.CLOC,
+                    meth.cognitive_complexity = m.cognitive_complexity,
                     meth.updated_at = m.updated_at
                 MERGE (c)-[:HAS_METHOD]->(meth)
                 """,
@@ -836,7 +844,7 @@ class ProjectMixin:
                 'PLOC': int(class_node.PLOC or 0),
                 'LLOC': int(class_node.LLOC or 0),
                 'CLOC': int(class_node.CLOC or 0),
-                'cognitive_complexity': int(class_node.cognitive_complexity or 0),
+                'code_complexity': int(class_node.code_complexity or 0),
             })
 
         if class_records:
@@ -860,7 +868,7 @@ class ProjectMixin:
                     cls.PLOC = c.PLOC,
                     cls.LLOC = c.LLOC,
                     cls.CLOC = c.CLOC,
-                    cls.cognitive_complexity = c.cognitive_complexity
+                    cls.code_complexity = c.code_complexity
                 """,
                 classes=class_records
             )
@@ -1135,6 +1143,10 @@ class ProjectMixin:
                     "ai_description": getattr(method, "ai_description", "") or "",
                     "logical_name": getattr(method, "logical_name", "") or "",
                     "source": getattr(method, "source", "") or "",
+                    "PLOC": getattr(method, "PLOC", 0),
+                    "LLOC": getattr(method, "LLOC", 0),
+                    "CLOC": getattr(method, "CLOC", 0),
+                    "cognitive_complexity": getattr(method, "cognitive_complexity", 0),
                     "updated_at": current_timestamp,
                 })
 
@@ -1187,6 +1199,10 @@ class ProjectMixin:
                     meth.source = m.source,
                     meth.package_name = m.package_name,
                     meth.project_name = m.project_name,
+                    meth.PLOC = m.PLOC,
+                    meth.LLOC = m.LLOC,
+                    meth.CLOC = m.CLOC,
+                    meth.cognitive_complexity = m.cognitive_complexity,
                     meth.updated_at = m.updated_at
                 MERGE (c)-[:HAS_METHOD]->(meth)
                 """,
