@@ -23,7 +23,8 @@
       "Bash(dir:*)",
       "Bash(more:*)",
       "Bash(d:workspaceslang-parser-worklang-parser-bxm5.venvScriptspython.exe -m pytest tests/unit/test_sql_parser.py -v)",
-      "Bash(.venvScriptspython.exe -m pytest tests/unit/test_sql_parser.py -v)"
+      "Bash(.venvScriptspython.exe -m pytest tests/unit/test_sql_parser.py -v)",
+      "Bash(d:workspaceslang-parser-worklang-parser-bxm5.venvScriptspython.exe -m pytest tests/unit/test_mybatis_file_extension.py -v)"
     ],
     "deny": [],
     "ask": []

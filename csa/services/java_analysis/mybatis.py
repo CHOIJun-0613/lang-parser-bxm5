@@ -457,11 +457,17 @@ def extract_mybatis_mappers_from_classes(classes: list[Class]) -> list[MyBatisMa
             }
             sql_statements.append(sql_statement)
         
+        # Extract file extension from file_path
+        file_extension = ""
+        if cls.file_path and "." in cls.file_path:
+            file_extension = cls.file_path.split(".")[-1]
+
         # Create mapper
         mapper = MyBatisMapper(
             name=cls.name,
             logical_name="",
             type="interface",
+            file_extension=file_extension,
             namespace=f"{cls.package_name}.{cls.name}",
             methods=mapper_methods,
             sql_statements=sql_statements,
@@ -613,11 +619,17 @@ def parse_mybatis_xml_file(file_path: str) -> MyBatisMapper:
         # Create mapper
         mapper_name = namespace.split(".")[-1] if namespace else os.path.basename(file_path).replace(".xml", "")
         package_name = ".".join(namespace.split(".")[:-1]) if namespace else ""
-        
+
+        # Extract file extension from file_path
+        file_extension = ""
+        if file_path and "." in file_path:
+            file_extension = file_path.split(".")[-1]
+
         mapper = MyBatisMapper(
             name=mapper_name,
             logical_name=mapper_logical_name if mapper_logical_name else "",
             type="xml",
+            file_extension=file_extension,
             namespace=namespace,
             methods=[],  # XML mappers don't have Java methods
             sql_statements=sql_statements,

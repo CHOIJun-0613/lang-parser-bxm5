@@ -166,10 +166,11 @@ class Endpoint(BaseModel):
 
 class MyBatisMapper(BaseModel):
     """Represents a MyBatis Mapper interface or XML file."""
-    
+
     name: str
     logical_name: str = ""
     type: str  # "interface", "xml"
+    file_extension: str = ""  # File extension (e.g., "xml", "dbio", "java")
     namespace: str = ""
     methods: list[dict] = []  # Mapper methods
     sql_statements: list[dict] = []  # SQL statements

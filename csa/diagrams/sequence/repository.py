@@ -116,6 +116,7 @@ def fetch_call_chain(
         sql.result_type AS sql_result_type,
         COALESCE(sql.mapper_name, mapper.name) AS mapper_name,
         COALESCE(sql.namespace, mapper.namespace) AS mapper_namespace,
+        COALESCE(mapper.file_extension, 'xml') AS mapper_file_extension,
         sql.project_name AS sql_project
     ORDER BY call_order, line_number, sql_id
     """
@@ -137,6 +138,7 @@ def fetch_call_chain(
         sql.result_type AS sql_result_type,
         COALESCE(sql.mapper_name, mapper.name) AS mapper_name,
         COALESCE(sql.namespace, mapper.namespace) AS mapper_namespace,
+        COALESCE(mapper.file_extension, 'xml') AS mapper_file_extension,
         sql.project_name AS sql_project
     ORDER BY sql.mapper_name
     """
@@ -399,6 +401,7 @@ def fetch_call_chain(
                 "sql_columns": record["sql_columns"],
                 "mapper_name": record["mapper_name"],
                 "mapper_namespace": record["mapper_namespace"],
+                "mapper_file_extension": record.get("mapper_file_extension", "xml"),
                 "sql_logical_name": record["sql_logical_name"],
                 "sql_display": record["mapper_name"] or sql_id,
                 "call_order": record["call_order"],
