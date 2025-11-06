@@ -62,7 +62,17 @@
 # !**/important/LegacyService.java
 
 # BXM 프레임워크에서 관리하는 IO 필드 정보 파일(*.omm)
-**/dto/*.omm
+# **/dto/*.omm  # .omm은 Java 파일이 아니므로 제외 불필요
 
 # git repository 관련 파일
-**/.git* 
+# **/.git*  # .git 폴더는 이미 분석 대상이 아님
+
+# ===========================
+# 테스트: 실제 Java 파일 제외
+# ===========================
+# DTO 클래스 제외 (테스트용 - 실제로 제외하려면 주석 해제)
+#**/*DODT.java
+#**/*DIDT.java
+
+# 특정 폴더의 모든 Java 파일 제외
+# **/dto/** 
