@@ -38,7 +38,8 @@
       "Bash(.venvScriptspython.exe fix_project.py)",
       "Bash(del \"D:\\workspaces\\lang-parser-work\\lang-parser-bxm5\\fix_project.py\")",
       "Bash(git restore:*)",
-      "Bash(.venvScriptspython.exe apply_csaignore_filter.py)"
+      "Bash(.venvScriptspython.exe apply_csaignore_filter.py)",
+      "Bash(.venvScriptspython.exe -m pytest tests/unit/test_file_classification.py -v)"
     ],
     "deny": [],
     "ask": []

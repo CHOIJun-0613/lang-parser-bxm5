@@ -37,6 +37,10 @@ def calculate_project_statistics(
     total_file_count = 0
     total_java_file_count = 0
     total_xml_file_count = 0
+    total_config_file_count = 0
+    total_ddl_file_count = 0
+    total_other_analyzed_file_count = 0
+    total_ignored_file_count = 0
     total_etc_file_count = 0
 
     if java_source_folder and os.path.exists(java_source_folder):
@@ -57,10 +61,21 @@ def calculate_project_statistics(
                 elif file.endswith('.xml') or file.endswith('.dbio'):
                     # MyBatis Mapper 파일(.dbio)도 XML 파일로 간주
                     total_xml_file_count += 1
+                elif file.endswith(('.yml', '.yaml', '.properties')):
+                    # 설정 파일
+                    total_config_file_count += 1
+                elif file.endswith('.sql'):
+                    # DDL 파일
+                    total_ddl_file_count += 1
                 else:
-                    total_etc_file_count += 1
+                    # 분석되지 않는 파일
+                    total_ignored_file_count += 1
 
-        logger.debug(f"파일 집계 완료: 전체={total_file_count}, Java={total_java_file_count}, XML={total_xml_file_count}, 기타={total_etc_file_count}")
+        # 하위 호환용 total_etc_file_count 계산
+        total_etc_file_count = total_config_file_count + total_ddl_file_count + total_other_analyzed_file_count + total_ignored_file_count
+
+        logger.debug(f"파일 집계 완료: 전체={total_file_count}, Java={total_java_file_count}, XML={total_xml_file_count}, "
+                     f"Config={total_config_file_count}, DDL={total_ddl_file_count}, Ignored={total_ignored_file_count}")
     else:
         logger.warning(f"Java 소스 폴더가 존재하지 않음: {java_source_folder}")
 
@@ -84,7 +99,11 @@ def calculate_project_statistics(
     project.total_file_count = total_file_count
     project.total_java_file_count = total_java_file_count
     project.total_xml_file_count = total_xml_file_count
-    project.total_etc_file_count = total_etc_file_count
+    project.total_config_file_count = total_config_file_count
+    project.total_ddl_file_count = total_ddl_file_count
+    project.total_other_analyzed_file_count = total_other_analyzed_file_count
+    project.total_ignored_file_count = total_ignored_file_count
+    project.total_etc_file_count = total_etc_file_count  # deprecated, 하위 호환용
     project.total_PLOC = total_ploc
     project.total_LLOC = total_lloc
     project.total_CLOC = total_cloc
@@ -118,6 +137,10 @@ def calculate_project_statistics_from_neo4j(
     total_file_count = 0
     total_java_file_count = 0
     total_xml_file_count = 0
+    total_config_file_count = 0
+    total_ddl_file_count = 0
+    total_other_analyzed_file_count = 0
+    total_ignored_file_count = 0
     total_etc_file_count = 0
 
     if java_source_folder and os.path.exists(java_source_folder):
@@ -137,8 +160,18 @@ def calculate_project_statistics_from_neo4j(
                 elif file.endswith('.xml') or file.endswith('.dbio'):
                     # MyBatis Mapper 파일(.dbio)도 XML 파일로 간주
                     total_xml_file_count += 1
+                elif file.endswith(('.yml', '.yaml', '.properties')):
+                    # 설정 파일
+                    total_config_file_count += 1
+                elif file.endswith('.sql'):
+                    # DDL 파일
+                    total_ddl_file_count += 1
                 else:
-                    total_etc_file_count += 1
+                    # 분석되지 않는 파일
+                    total_ignored_file_count += 1
+
+        # 하위 호환용 total_etc_file_count 계산
+        total_etc_file_count = total_config_file_count + total_ddl_file_count + total_other_analyzed_file_count + total_ignored_file_count
 
     # LOC 통계 집계 (Neo4j에서 모든 Class 조회)
     total_ploc = 0
@@ -160,7 +193,11 @@ def calculate_project_statistics_from_neo4j(
     project.total_file_count = total_file_count
     project.total_java_file_count = total_java_file_count
     project.total_xml_file_count = total_xml_file_count
-    project.total_etc_file_count = total_etc_file_count
+    project.total_config_file_count = total_config_file_count
+    project.total_ddl_file_count = total_ddl_file_count
+    project.total_other_analyzed_file_count = total_other_analyzed_file_count
+    project.total_ignored_file_count = total_ignored_file_count
+    project.total_etc_file_count = total_etc_file_count  # deprecated, 하위 호환용
     project.total_PLOC = total_ploc
     project.total_LLOC = total_lloc
     project.total_CLOC = total_cloc
@@ -182,13 +219,21 @@ def aggregate_file_statistics(root_folder: str) -> Dict[str, int]:
         Dict[str, int]: 파일 통계 딕셔너리
             - total_files: 전체 파일 수
             - java_files: Java 파일 수
-            - xml_files: XML 파일 수
-            - etc_files: 기타 파일 수
+            - xml_files: XML 파일 수 (.xml, .dbio)
+            - config_files: 설정 파일 수 (.yml, .yaml, .properties)
+            - ddl_files: DDL 파일 수 (.sql)
+            - other_analyzed_files: 기타 분석된 파일 수 (향후 확장용)
+            - ignored_files: 분석되지 않은 파일 수
+            - etc_files: (deprecated) 기타 파일 수
     """
     stats = {
         'total_files': 0,
         'java_files': 0,
         'xml_files': 0,
+        'config_files': 0,
+        'ddl_files': 0,
+        'other_analyzed_files': 0,
+        'ignored_files': 0,
         'etc_files': 0
     }
 
@@ -210,9 +255,16 @@ def aggregate_file_statistics(root_folder: str) -> Dict[str, int]:
 
             if file.endswith('.java'):
                 stats['java_files'] += 1
-            elif file.endswith('.xml'):
+            elif file.endswith('.xml') or file.endswith('.dbio'):
                 stats['xml_files'] += 1
+            elif file.endswith(('.yml', '.yaml', '.properties')):
+                stats['config_files'] += 1
+            elif file.endswith('.sql'):
+                stats['ddl_files'] += 1
             else:
-                stats['etc_files'] += 1
+                stats['ignored_files'] += 1
+
+    # 하위 호환용 etc_files 계산
+    stats['etc_files'] = stats['config_files'] + stats['ddl_files'] + stats['other_analyzed_files'] + stats['ignored_files']
 
     return stats
