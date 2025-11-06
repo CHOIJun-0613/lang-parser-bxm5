@@ -615,9 +615,25 @@ def save_java_objects_to_neo4j(
 
         project = calculate_project_statistics(project, classes_dict, java_source_folder)
 
-    logger.info("프로젝트 통계: 전체 파일 %d개 (Java: %d, XML: %d, 기타: %d), PLOC: %d, LLOC: %d, CLOC: %d",
-                project.total_file_count, project.total_java_file_count, project.total_xml_file_count,
-                project.total_etc_file_count, project.total_PLOC, project.total_LLOC, project.total_CLOC)
+    # 분석 대상 파일 수 계산
+    analyzed_count = (project.total_java_file_count +
+                     project.total_xml_file_count +
+                     project.total_config_file_count +
+                     project.total_ddl_file_count +
+                     project.total_other_analyzed_file_count)
+
+    logger.info("=" * 80)
+    logger.info("프로젝트 통계: 전체 파일 %d개", project.total_file_count)
+    logger.info("  - 분석 대상: %d개 (Java: %d, XML: %d, Config: %d, DDL: %d)",
+                analyzed_count,
+                project.total_java_file_count,
+                project.total_xml_file_count,
+                project.total_config_file_count,
+                project.total_ddl_file_count)
+    logger.info("  - 분석 미대상: %d개", project.total_ignored_file_count)
+    logger.info("  - LOC 통계: PLOC %d, LLOC %d, CLOC %d",
+                project.total_PLOC, project.total_LLOC, project.total_CLOC)
+    logger.info("=" * 80)
 
     db.add_project(project)
 
