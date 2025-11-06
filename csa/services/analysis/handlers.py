@@ -52,9 +52,9 @@ def _prepare_database(
             db.clean_java_objects(project_name)
             logger.info(f"Java objects for project '{project_name}' cleaned successfully")
         elif db_object:
-            logger.info(f"Cleaning DB objects for project '{project_name}'...")
-            db.clean_db_objects(project_name)
-            logger.info(f"DB objects for project '{project_name}' cleaned successfully")
+            logger.info("Cleaning DB objects (shared across all projects)...")
+            db.clean_db_objects()
+            logger.info("DB objects cleaned successfully")
 
     # 인덱스 확인 및 생성 (없으면 생성, 있으면 건너뜀)
     # 데이터 저장 전에 실행하여 MERGE 성능 보장

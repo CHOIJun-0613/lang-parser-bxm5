@@ -57,22 +57,22 @@ def analyze_full_project_db(
         logger.info("Processing database: %s", db_name)
 
         for obj in objects:
-            db.add_database(obj["database"], project_name)
+            db.add_database(obj["database"])
 
             for table in obj["tables"]:
-                db.add_table(table, db_name, project_name)
+                db.add_table(table, db_name)
                 stats.tables += 1
 
             for column in obj["columns"]:
-                db.add_column(column, column.table_name, project_name)
+                db.add_column(column, column.table_name)
                 stats.columns += 1
 
             for index, table_name in obj["indexes"]:
-                db.add_index(index, table_name, project_name)
+                db.add_index(index, table_name)
                 stats.indexes += 1
 
             for constraint, table_name in obj["constraints"]:
-                db.add_constraint(constraint, table_name, project_name)
+                db.add_constraint(constraint, table_name)
                 stats.constraints += 1
 
     stats.start_time = db_start_time

@@ -13,18 +13,20 @@ class CrudMatrixMixin:
         Args:
             session: Neo4j 세션
             table_name: 테이블명
-            project_name: 프로젝트명
+            project_name: 프로젝트명 (사용되지 않음, 하위 호환성 유지)
 
         Returns:
             {"database_name": str, "schema_name": str} 형태의 dict
             Table 노드가 없으면 빈 문자열 반환
+
+        Note:
+            Table 노드는 프로젝트 간 공유 리소스이므로 project_name 필터를 사용하지 않습니다.
         """
         query = """
         MATCH (t:Table {name: $table_name})
-        WHERE ($project_name IS NULL OR t.project_name = $project_name)
         RETURN t.schema as schema, t.database_name as database_name
         """
-        result = session.run(query, table_name=table_name, project_name=project_name)
+        result = session.run(query, table_name=table_name)
         record = result.single()
         if not record:
             return {"database_name": "", "schema_name": ""}

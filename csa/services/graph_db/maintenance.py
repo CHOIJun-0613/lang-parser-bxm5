@@ -155,24 +155,32 @@ class MaintenanceMixin:
         Remove database metadata nodes from the graph.
 
         Args:
-            project_name: If provided, only delete DB nodes related to this project.
-                         If None, delete all DB nodes (backward compatibility).
+            project_name: This parameter is ignored. DB objects are shared across projects
+                         and will always be deleted entirely (not project-specific).
+
+        Note:
+            Database objects (Database, Table, Column, Index, Constraint) are shared
+            resources across multiple projects. They are not project-specific and
+            cannot be deleted on a per-project basis to prevent data inconsistency.
         """
+        # DB 객체는 프로젝트 간 공유 리소스이므로 project_name을 무시
+        if project_name:
+            # 경고: project_name이 전달되었지만 무시됨
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                "DB objects (Database, Table, Column, Index, Constraint) are shared across projects. "
+                "Ignoring project_name='%s' and cleaning ALL DB objects.",
+                project_name
+            )
+
+        # 전체 삭제 (프로젝트 구분 없음)
         with self._driver.session(database=self._database) as session:
-            if project_name:
-                # 프로젝트별 삭제
-                session.run("MATCH (n:Database {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
-                session.run("MATCH (n:Table {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
-                session.run("MATCH (n:Column {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
-                session.run("MATCH (n:Index {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
-                session.run("MATCH (n:Constraint {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
-            else:
-                # 전체 삭제 (기존 로직)
-                session.run("MATCH (n:Database) DETACH DELETE n")
-                session.run("MATCH (n:Table) DETACH DELETE n")
-                session.run("MATCH (n:Column) DETACH DELETE n")
-                session.run("MATCH (n:Index) DETACH DELETE n")
-                session.run("MATCH (n:Constraint) DETACH DELETE n")
+            session.run("MATCH (n:Database) DETACH DELETE n")
+            session.run("MATCH (n:Table) DETACH DELETE n")
+            session.run("MATCH (n:Column) DETACH DELETE n")
+            session.run("MATCH (n:Index) DETACH DELETE n")
+            session.run("MATCH (n:Constraint) DETACH DELETE n")
 
     def clean_database(self, project_name: Optional[str] = None) -> None:
         """
