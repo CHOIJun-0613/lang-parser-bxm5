@@ -32,7 +32,10 @@ csa/
 │   │   ├── sequence.py           # 시퀀스 다이어그램 생성 명령
 │   │   ├── crud.py               # CRUD 매트릭스/교차표 생성 명령
 │   │   ├── db_calls.py           # DB 호출 관계 분석 명령
-│   │   └── graph_queries.py      # Neo4j 그래프 쿼리 명령
+│   │   ├── graph_queries.py      # Neo4j 그래프 쿼리 명령
+│   │   ├── class_spec.py         # 클래스 명세서 생성 명령
+│   │   ├── impact.py             # 영향도 분석 명령
+│   │   └── ai_enrich.py          # AI Enrichment 명령
 │   └── core/                     # 명령어 공용 로직
 │       ├── lifecycle.py          # 명령어 라이프사이클 관리
 │       └── storage.py            # 저장소 관리
@@ -44,7 +47,9 @@ csa/
 │   │                            # (MyBatisMapper, MyBatisSqlStatement, SqlStatement)
 │   │                            # (JpaEntity, JpaRepository, JpaQuery)
 │   │                            # (Database, Table, Column, Index, Constraint)
-│   └── analysis.py              # 분석 통계 모델
+│   ├── analysis.py              # 분석 통계 모델
+│   ├── class_spec.py            # 클래스 명세서 모델
+│   └── impact.py                # 영향도 분석 모델
 │
 ├── services/                     # 핵심 분석 엔진
 │   ├── analyze_service.py        # 분석 파사드 (진입점)
@@ -74,7 +79,8 @@ csa/
 │   │   ├── persistence_nodes.py  # Bean/Endpoint/Mapper/SQL 노드 CRUD
 │   │   ├── database_nodes.py     # Database/Table/Column 노드 CRUD
 │   │   ├── analytics.py          # 분석 쿼리 (SQL 복잡도, 테이블 사용량)
-│   │   └── maintenance.py        # 유지보수 작업
+│   │   ├── maintenance.py        # 유지보수 작업
+│   │   └── indexes.py            # 인덱스 관리
 │   │
 │   ├── db_call_analysis/         # DB 호출 관계 분석
 │   │   ├── base.py               # 기본 클래스
@@ -82,7 +88,16 @@ csa/
 │   │   ├── crud.py               # CRUD 매트릭스 생성
 │   │   ├── diagrams.py           # 호출 체인 Markdown/이미지 다이어그램
 │   │   ├── impact.py             # 영향도 분석
+│   │   ├── impact_reporter.py    # 영향도 분석 리포트 생성
+│   │   ├── reverse_impact.py     # 역방향 영향도 분석 (테이블→메서드)
 │   │   └── reports.py            # 리포트 생성
+│   │
+│   ├── class_spec/               # 클래스 명세서 생성
+│   │   ├── generator.py          # 명세서 생성 오케스트레이션
+│   │   ├── repository.py         # 클래스 정보 저장소
+│   │   └── template.py           # 명세서 템플릿
+│   │
+│   ├── ai_enrichment_service.py  # AI Enrichment 서비스
 │   │
 │   ├── java_parser.py            # Java 파싱 파사드
 │   ├── java_parser_addon_r001.py # 논리명 추출 규칙 엔진
@@ -92,7 +107,8 @@ csa/
 ├── parsers/                      # 저수준 파싱 엔진
 │   ├── java/
 │   │   ├── logical_name.py       # 클래스/메서드/필드 논리명 추출
-│   │   └── description.py        # 설명 추출
+│   │   ├── description.py        # 설명 추출
+│   │   └── class_subtype.py      # 클래스 하위 타입 추출 (Controller, Service 등)
 │   ├── db/
 │   │   └── ddl_parser.py         # DDL 구조 분석
 │   ├── sql/
@@ -101,11 +117,13 @@ csa/
 │   └── vendor/javalang/          # Java AST 파서 라이브러리
 │
 ├── diagrams/                     # 시각화 생성
-│   └── sequence/
-│       ├── generator.py          # 다이어그램 생성 오케스트레이션
-│       ├── mermaid.py            # Mermaid 형식 생성기
-│       ├── plantuml.py           # PlantUML 형식 생성기
-│       └── repository.py         # 호출 체인 저장소
+│   ├── sequence/
+│   │   ├── generator.py          # 다이어그램 생성 오케스트레이션
+│   │   ├── mermaid.py            # Mermaid 형식 생성기
+│   │   ├── plantuml.py           # PlantUML 형식 생성기
+│   │   └── repository.py         # 호출 체인 저장소
+│   └── impact/
+│       └── mermaid_generator.py  # 영향도 다이어그램 생성
 │
 ├── dbwork/                       # Neo4j 연결풀 관리
 │   └── connection_pool.py        # 커넥션 풀 (스레드 안전, 트랜잭션)
@@ -113,12 +131,23 @@ csa/
 ├── utils/                        # 공용 유틸리티
 │   ├── logger.py                 # 커스텀 로거 (명령별 분리, 7일 자동 정리)
 │   ├── rules_manager.py          # 규칙 매니저
-│   └── class_helpers.py          # 클래스 유틸리티 함수
+│   ├── class_helpers.py          # 클래스 유틸리티 함수
+│   ├── cognitive_complexity.py   # 인지 복잡도 계산
+│   ├── loc_calculator.py         # LOC 계산 (PLOC/LLOC/CLOC)
+│   ├── code_complexity.py        # 코드 복잡도 계산
+│   └── project_statistics.py     # 프로젝트 통계
+│
+├── aiwork/                       # AI 분석 작업
+│   ├── ai_analyzer.py            # AI 분석 엔진 (배치 처리)
+│   ├── ai_providers.py           # 다중 AI 제공자 (Google, Groq, LM Studio, OpenAI)
+│   ├── prompt.py                 # 프롬프트 템플릿
+│   └── ai_config.py              # AI 설정 관리
 │
 ├── rules/                        # 논리명/설명 추출 규칙 정의 (Markdown)
+│   ├── rule000_analysis_rule.md  # Bxm Framework 분석 규칙
 │   ├── rule001_extraction_logical_name.md
 │   ├── rule002_extraction_description.md
-│   └── car_center_devlab_logical_name_rules.md
+│   └── rule003_extraction_class_subtype.md  # 클래스 하위 타입 추출
 │
 └── vendor/                       # 외부 라이브러리
     └── javalang/                 # Java 파싱 라이브러리 (AST 생성)
@@ -239,6 +268,52 @@ Neo4j 업데이트 (ai_description 채움)
 - **완전 자동화**: Option 2 (파싱과 AI 분석 동시)
 - **선택적 AI**: Option 1 → ai-enrich로 특정 노드만 처리
 
+#### 7. **클래스 명세서 생성**
+```
+class-spec 명령어
+    ↓
+Neo4j에서 클래스 정보 조회
+    ↓
+class_spec/repository.py: 데이터 수집
+    ├─→ 클래스 기본 정보 (이름, 패키지, 타입, 하위 타입)
+    ├─→ 메서드 목록 (시그니처, 논리명, 복잡도)
+    ├─→ 필드 목록 (타입, 논리명)
+    ├─→ Bean 의존성
+    └─→ CRUD 정보 (사용하는 테이블)
+    ↓
+class_spec/template.py: Markdown 템플릿 적용
+    ↓
+class_spec/generator.py: 파일 생성
+    ↓
+output/class-spec/ 에 저장
+```
+
+#### 8. **영향도 분석**
+```
+impact-analysis 명령어
+    ↓
+[테이블 영향도 분석]
+reverse_impact.py: analyze_table_impact_reverse()
+    ├─→ 테이블 사용하는 SQL 조회
+    ├─→ SQL 호출하는 메서드 추적 (역방향)
+    ├─→ 메서드 호출하는 상위 메서드 추적 (재귀, max_depth)
+    └─→ 영향받는 클래스/패키지 집계
+    ↓
+[메서드 영향도 분석]
+reverse_impact.py: analyze_method_impact_reverse()
+    ├─→ 메서드 호출하는 상위 메서드 추적 (역방향)
+    ├─→ 재귀적 호출 체인 분석 (max_depth)
+    └─→ 영향받는 클래스/패키지 집계
+    ↓
+impact_reporter.py: 리포트 생성
+    ├─→ Markdown 리포트 (상세 정보)
+    ├─→ Excel 리포트 (표 형식)
+    ├─→ JSON 리포트 (선택사항)
+    └─→ Mermaid 다이어그램 (선택사항)
+    ↓
+output/impact-analysis/ 에 저장
+```
+
 ### Neo4j 그래프 모델
 
 - **프로젝트 노드**: `Project`
@@ -282,14 +357,20 @@ DB_SCRIPT_FOLDER=target_src/car-center-devlab/src/main/resources/db/prod
 LOG_LEVEL=INFO
 SEQUENCE_DIAGRAM_OUTPUT_DIR=./output/sequence-diagram
 CRUD_MATRIX_OUTPUT_DIR=./output/crud-matrix
+CLASS_SPEC_OUTPUT_DIR=./output/class-spec
+IMPACT_ANALYSIS_OUTPUT_DIR=./output/impact-analysis
 
 # 성능 최적화 (선택사항)
 USE_STREAMING_PARSE=true                # 스트리밍 모드 활성화 (대규모 프로젝트용)
-JAVA_PARSE_WORKERS=8                    # 병렬 워커 수 (기본값: 8)
+JAVA_PARSE_WORKERS=자동 설정            # 병렬 워커 수 (기본값: max(4, CPU 코어수-2), 수동 설정 가능)
+JAVA_FILE_PARSE_TIMEOUT=120.0           # 파일 파싱 타임아웃 (초, 기본값: 120.0)
+JAVA_COMPLEXITY_THRESHOLD=50000         # 파일 복잡도 임계값 (초과 시 분석 제외)
+SKIP_DTO_SOURCE=true                    # DTO 소스 코드 저장 건너뛰기 (성능 향상, 기본값: false)
+SKIP_DTO_METHODS=true                   # DTO 메서드 분석 생략 (기본값: true)
 
 # AI 분석 설정 (선택사항)
 USE_AI_ANALYSIS=true                    # AI 분석 시스템 활성화 (기본값: false)
-CONCURRENT_AI_REQUESTS=10               # AI enrichment 동시 요청 수 (기본값: 10, 로컬: 10-20, 클라우드: 5-10)
+CONCURRENT_AI_REQUESTS=15               # AI enrichment 동시 요청 수 (기본값: 10, 로컬: 10-20, 클라우드: 5-10)
 AI_PROVIDER=lmstudio                    # AI provider (google, groq, lmstudio, openai)
 
 # 외부 도구 경로 (선택사항)
@@ -410,6 +491,64 @@ python -m csa.cli.main crud-matrix --project-name myproject --output-format exce
 python -m csa.cli.main db_call_diagram --project-name myproject --output-image diagram.png
 ```
 
+### 클래스 명세서 생성
+
+```bash
+# 클래스 명세서 생성 (기본)
+python -m csa.cli.main class-spec --project-name myproject --class-name UserController
+
+# CRUD 정보 포함
+python -m csa.cli.main class-spec --project-name myproject --class-name UserService --include-crud-info
+
+# 출력 디렉터리 지정
+python -m csa.cli.main class-spec --project-name myproject --class-name UserRepository --output-dir ./docs/specs
+```
+
+**옵션 설명:**
+- `--project-name`: 프로젝트명 (필수)
+- `--class-name`: 클래스명 (단순명 또는 FQCN, 필수)
+- `--output-dir`: 출력 디렉터리 (기본값: output/class-spec)
+- `--include-crud-info`: CRUD 정보 포함 (기본값: True)
+- `--include-diagram`: 클래스 다이어그램 포함 (미구현)
+
+### 영향도 분석
+
+```bash
+# 테이블 영향도 분석 (기본)
+python -m csa.cli.main impact-analysis --table-name USER
+
+# 특정 프로젝트의 테이블 영향도 분석
+python -m csa.cli.main impact-analysis --table-name USER --project-name myproject
+
+# 테이블 영향도 분석 (JSON + 다이어그램 포함)
+python -m csa.cli.main impact-analysis --table-name USER --include-json --generate-diagram
+
+# 메서드 영향도 분석
+python -m csa.cli.main impact-analysis --class-name UserService --method-name getUser --project-name myproject
+
+# 클래스의 모든 public 메서드 영향도 분석
+python -m csa.cli.main impact-analysis --class-name UserService --project-name myproject
+
+# 호출 깊이 제한 및 다이어그램 생성
+python -m csa.cli.main impact-analysis --table-name ORDER --max-depth 5 --generate-diagram
+```
+
+**옵션 설명:**
+- `--table-name`: 테이블명 (테이블 영향도 분석 시 필수)
+- `--class-name`: 클래스명 (메서드 영향도 분석 시 필수)
+- `--method-name`: 메서드명 (선택사항, 생략 시 모든 public 메서드)
+- `--project-name`: 프로젝트명 (선택사항, 생략 시 전체 프로젝트)
+- `--max-depth`: 최대 호출 깊이 (기본값: 10)
+- `--include-json`: JSON 파일 추가 생성 (기본값: False)
+- `--generate-diagram`: Mermaid 다이어그램 생성 (기본값: False)
+- `--output-dir`: 출력 디렉터리 (기본값: output/impact-analysis)
+
+**출력 파일:**
+- Markdown 리포트: 상세 정보 (항상 생성)
+- Excel 리포트: 표 형식 (항상 생성)
+- JSON 리포트: 구조화된 데이터 (선택사항)
+- Mermaid 다이어그램: 시각화 (선택사항)
+
 ### 배치 스크립트 (Windows)
 
 ```bash
@@ -529,11 +668,32 @@ pytest --cov=csa tests/
 
 ## 최근 구현 완료 기능
 
+### 핵심 기능
 - **Inner Class 지원** (`csa/services/java_analysis/project.py`): 내부 클래스 중복 제거 및 선언부만 추출
 - **Bean Dependency Resolver** (`csa/services/java_analysis/bean_dependency_resolver.py`): Constructor/Setter/Field Injection 지원
 - **스트리밍 모드** (`USE_STREAMING_PARSE=true`): 대규모 프로젝트 메모리 효율성
 - **로그 파일 분리** (`csa/utils/logger.py`): 명령별 로그 파일 분리 및 7일 자동 정리
-- **병렬 처리** (`JAVA_PARSE_WORKERS`): 멀티코어 활용으로 분석 속도 향상
+- **병렬 처리** (`JAVA_PARSE_WORKERS`): 멀티코어 활용으로 분석 속도 향상 (자동 설정: max(4, CPU-2))
+
+### 새로운 메트릭 및 분석
+- **인지 복잡도** (`csa/utils/cognitive_complexity.py`): 메서드 인지 복잡도 계산 (Method.cognitive_complexity)
+- **코드 복잡도** (`csa/utils/code_complexity.py`): 클래스 코드 복잡도 계산 (Class.code_complexity)
+- **LOC 메트릭** (`csa/utils/loc_calculator.py`): PLOC (Physical LOC), LLOC (Logical LOC), CLOC (Comment LOC)
+- **클래스 하위 타입** (`csa/parsers/java/class_subtype.py`): Controller, Service, Repository 등 자동 식별
+
+### 새로운 CLI 명령어
+- **클래스 명세서 생성** (`class-spec`): 클래스 상세 명세서 자동 생성 (Markdown)
+- **영향도 분석** (`impact-analysis`): 테이블/메서드 변경 시 영향도 역추적 분석
+- **AI Enrichment** (`ai-enrich`): 사후 AI 분석으로 노드에 AI 설명 추가
+
+### AI 통합
+- **다중 AI 제공자** (`csa/aiwork/ai_providers.py`): Google Gemini, Groq, LM Studio, OpenAI 지원
+- **비동기 병렬 처리** (`CONCURRENT_AI_REQUESTS`): AI enrichment 동시 요청 수 조절
+- **선택적 AI 분석**: 파싱 시 (`--use-ai`) 또는 사후 (`ai-enrich`) 선택 가능
+
+### Bxm Framework 지원
+- **Bxm 어노테이션 분석** (`rule000`): @BxmCategory, @BxmDataAccess, @BxmOmm_Field 등
+- **MyBatis 확장**: .dbio 파일 지원 (Bxm Framework 전용 매퍼 확장자)
 
 ### ⚡ 성능 개선 v0.6 (2025-11-04)
 
@@ -668,6 +828,63 @@ SKIP_DTO_SOURCE=false  # 모든 클래스 소스 저장
 - `src/` - 기타 소스
 - `target_src/` - 분석 대상 소스 (별도로 구성)
 
+### 분석 대상 파일 필터링 (.csaignore)
+
+프로젝트 루트에 `.csaignore` 파일을 생성하여 Java 분석에서 제외할 파일/폴더를 지정할 수 있습니다.
+
+**.csaignore 규칙:**
+- .gitignore와 동일한 패턴 문법 사용 (pathspec 라이브러리)
+- `#`로 시작하는 줄은 주석
+- `**/path/**` 패턴으로 디렉터리 제외
+- `**/*Pattern.java` 패턴으로 파일명 패턴 매칭
+- `!` 접두사로 예외 지정 (제외 대상에서 다시 포함)
+
+**예제:**
+```
+# 생성된 코드
+**/generated/**
+**/target/generated-sources/**
+
+# 대용량 DTO 클래스
+**/*DODT.java
+**/*DIDT.java
+**/*Grid.java
+
+# 특정 패키지
+**/com/example/deprecated/**
+
+# Lombok 생성 코드
+**/*$*.java
+
+# 예외 (다시 포함)
+!**/com/example/deprecated/ImportantClass.java
+```
+
+**사용 방법:**
+1. 프로젝트 루트에 `.csaignore` 파일 생성 (.env 파일과 같은 위치)
+2. 제외할 패턴 추가
+3. 분석 실행 시 자동으로 적용됨
+
+**로그 확인:**
+```
+[INFO] .csaignore 패턴 적용 중...
+[INFO] .csaignore로 XX개 파일 제외됨
+```
+
+**필수 라이브러리:**
+- `pathspec` 라이브러리 필요: `pip install pathspec`
+- 이미 requirements.txt에 포함되어 있음
+
+**주의사항:**
+- `.csaignore` 파일은 버전 관리에 포함됨 (.gitignore에 없음)
+- Unix 스타일 경로 사용 (Windows에서도 `/` 사용)
+- 패턴은 JAVA_SOURCE_FOLDER 기준 상대 경로로 매칭
+- `.csaignore` 파일이 없으면 모든 파일 분석 (기본 동작)
+
+**상세 가이드:**
+- `docs/.csaignore 기능 적용 가이드.md` 참조
+- project.py 통합 방법 포함
+
 ### 보안
 
 - **민감 정보 커밋 금지**: `.env` 파일, 자격 증명, API 키 등
@@ -699,6 +916,28 @@ SKIP_DTO_SOURCE=false  # 모든 클래스 소스 저장
 - **위치**: `output/crud-matrix/`
 - **형식**: Excel (`.xlsx`), Markdown (`.md`)
 - **내용**: 테이블별 CRUD 작업 매핑
+
+### 클래스 명세서
+
+- **위치**: `output/class-spec/<프로젝트명>/`
+- **형식**: Markdown (`.md`)
+- **내용**:
+  - 클래스 기본 정보 (이름, 패키지, 타입, 하위 타입)
+  - 메서드 목록 (시그니처, 논리명, 복잡도)
+  - 필드 목록 (타입, 논리명)
+  - Bean 의존성
+  - CRUD 정보 (사용하는 테이블)
+
+### 영향도 분석
+
+- **위치**: `output/impact-analysis/`
+- **형식**: Markdown (`.md`), Excel (`.xlsx`), JSON (`.json`, 선택), Mermaid 다이어그램 (`.md`, 선택)
+- **내용**:
+  - 테이블 영향도: 테이블 변경 시 영향받는 메서드/클래스
+  - 메서드 영향도: 메서드 변경 시 영향받는 상위 메서드/클래스
+  - 호출 체인 (최대 깊이 제한 가능)
+  - 리스크 등급 (HIGH, MEDIUM, LOW)
+  - 순환 참조 감지
 
 ## 문제 해결
 

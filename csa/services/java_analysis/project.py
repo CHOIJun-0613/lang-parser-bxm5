@@ -35,6 +35,7 @@ from csa.utils.logger import get_logger
 from csa.utils.loc_calculator import calculate_loc, LOCMetrics
 from csa.utils.cognitive_complexity import calculate_method_cognitive_complexity
 from csa.utils.code_complexity import calculate_code_complexity_from_class_node
+from csa.utils.csaignore import load_csaignore_filter
 from .config import extract_config_files
 from .jpa import (
     analyze_jpa_entity_table_mapping,
@@ -723,355 +724,354 @@ def parse_java_project_full(directory: str, graph_db: GraphDB = None) -> tuple[l
     processed_classes = 0
     last_logged_percent = 0
     
+    # 모든 .java 파일 수집 (.csaignore 필터 포함)
+    logger.info("Java 파일 수집 중...")
+    java_files = _collect_java_files_with_csaignore(directory)
+    logger.info(f"총 {len(java_files)}개 Java 파일 발견")
+
     # 먼저 전체 클래스 개수를 계산
     logger.info("클래스 개수 계산 중...")
-    for root, _, files in os.walk(directory):
-        for file in files:
-            if file.endswith(".java"):
-                file_path = os.path.join(root, file)
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        file_content = f.read()
-                    
-                    tree = javalang.parse.parse(file_content)
-                    for type_decl in tree.types:
-                        if isinstance(type_decl, (javalang.tree.ClassDeclaration, javalang.tree.InterfaceDeclaration)):
-                            total_classes += 1
-                except Exception:
-                    continue
-    
+    for file_path in java_files:
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                file_content = f.read()
+
+            tree = javalang.parse.parse(file_content)
+            for type_decl in tree.types:
+                if isinstance(type_decl, (javalang.tree.ClassDeclaration, javalang.tree.InterfaceDeclaration)):
+                    total_classes += 1
+        except Exception:
+            continue
+
     logger.info(f"총 {total_classes}개 클래스 발견")
-    
-    for root, _, files in os.walk(directory):
-        for file in files:
-            if file.endswith(".java"):
-                java_file_count += 1
-                file_path = os.path.join(root, file)
-                logger.debug(f"Processing Java file {java_file_count}: {file_path}")
+
+    for file_path in java_files:
+        java_file_count += 1
+        logger.debug(f"Processing Java file {java_file_count}: {file_path}")
+
+        with open(file_path, 'r', encoding='utf-8') as f:
+            file_content = f.read()
+
+        try:
+            tree = javalang.parse.parse(file_content)
+            package_name = tree.package.name if tree.package else ""
+            logger.debug(f"Parsed file: {file_path}, package: {package_name}")
+            
+            if package_name and package_name not in packages:
+                packages[package_name] = Package(
+                    name=package_name
+                )
+            elif not package_name:
+                package_name = "default"
+                if package_name not in packages:
+                    packages[package_name] = Package(
+                        name=package_name
+                    )
+            
+            import_map = {}
+            for imp in tree.imports:
+                class_name = imp.path.split('.')[-1]
+                import_map[class_name] = imp.path
+
+            class_declarations = []
+            for type_decl in tree.types:
+                if isinstance(type_decl, (javalang.tree.ClassDeclaration, javalang.tree.InterfaceDeclaration)):
+                    class_declarations.append((None, type_decl))
+            
+            for _, class_declaration in class_declarations:
+                class_name = class_declaration.name
+                class_key = f"{package_name}.{class_name}"
+                logger.debug(f"Processing class/interface: {class_name} (type: {type(class_declaration).__name__})")
                 
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    file_content = f.read()
+                if class_key not in classes:
+                    class_annotations = parse_annotations(class_declaration.annotations, "class") if hasattr(class_declaration, 'annotations') else []
+                    class_type = "interface" if isinstance(class_declaration, javalang.tree.InterfaceDeclaration) else "class"
+                    
+                    # sub_type 추출 (package name의 마지막 단어)
+                    sub_type = extract_sub_type(package_name, class_name, class_annotations)
+                    
+                    # 논리명 추출 시도 (rule001: @BxmCategory의 logicalName 파라미터에서 추출)
+                    from csa.services.java_parser_addon_r001 import extract_class_logical_name_from_annotations
+                    class_logical_name = extract_class_logical_name_from_annotations(class_annotations) or ""
+
+                    # description 추출 시도 (rule002: @BxmCategory의 description 파라미터에서 추출)
+                    from csa.parsers.java.description import extract_class_description_from_annotations
+                    class_description = extract_class_description_from_annotations(class_annotations) or ""
+
+                    # LOC 메트릭 계산
+                    loc_metrics = calculate_loc(file_content)
+
+                    classes[class_key] = Class(
+                        name=class_name,
+                        logical_name=class_logical_name if class_logical_name else "",
+                        file_path=file_path,
+                        type=class_type,
+                        sub_type=sub_type,
+                        source=file_content,
+                        annotations=class_annotations,
+                        package_name=package_name,
+                        project_name=project_name,
+                        description=class_description if class_description else "",
+                        ai_description="",
+                        bxm_category=class_logical_name if class_logical_name else "",
+                        PLOC=loc_metrics.ploc,
+                        LLOC=loc_metrics.lloc,
+                        CLOC=loc_metrics.cloc,
+                        code_complexity=0  # 메서드와 필드 추가 후 재계산
+                    )
+                    class_to_package_map[class_key] = package_name
+                    logger.debug(f"Successfully added class to classes dict: {class_name} (key: {class_key})")
+                    
+                    # 진행 상황을 10% 단위로 표시
+                    processed_classes += 1
+                    current_percent = int((processed_classes / total_classes) * 100) if total_classes > 0 else 0
+                    
+                    if current_percent >= last_logged_percent + 10 or processed_classes == total_classes:
+                        last_logged_percent = current_percent
+                        logger.info(f"클래스 파싱 진행중 [{processed_classes}/{total_classes}] ({current_percent}%) - 최근: {class_name}")
+                else:
+                    logger.debug(f"Class {class_name} already exists, skipping")
                 
-                try:
-                    tree = javalang.parse.parse(file_content)
-                    package_name = tree.package.name if tree.package else ""
-                    logger.debug(f"Parsed file: {file_path}, package: {package_name}")
-                    
-                    if package_name and package_name not in packages:
-                        packages[package_name] = Package(
-                            name=package_name
-                        )
-                    elif not package_name:
-                        package_name = "default"
-                        if package_name not in packages:
-                            packages[package_name] = Package(
-                                name=package_name
-                            )
-                    
-                    import_map = {}
-                    for imp in tree.imports:
-                        class_name = imp.path.split('.')[-1]
-                        import_map[class_name] = imp.path
+                for imp in tree.imports:
+                    classes[class_key].imports.append(imp.path)
 
-                    class_declarations = []
-                    for type_decl in tree.types:
-                        if isinstance(type_decl, (javalang.tree.ClassDeclaration, javalang.tree.InterfaceDeclaration)):
-                            class_declarations.append((None, type_decl))
-                    
-                    for _, class_declaration in class_declarations:
-                        class_name = class_declaration.name
-                        class_key = f"{package_name}.{class_name}"
-                        logger.debug(f"Processing class/interface: {class_name} (type: {type(class_declaration).__name__})")
-                        
-                        if class_key not in classes:
-                            class_annotations = parse_annotations(class_declaration.annotations, "class") if hasattr(class_declaration, 'annotations') else []
-                            class_type = "interface" if isinstance(class_declaration, javalang.tree.InterfaceDeclaration) else "class"
-                            
-                            # sub_type 추출 (package name의 마지막 단어)
-                            sub_type = extract_sub_type(package_name, class_name, class_annotations)
-                            
-                            # 논리명 추출 시도 (rule001: @BxmCategory의 logicalName 파라미터에서 추출)
-                            from csa.services.java_parser_addon_r001 import extract_class_logical_name_from_annotations
-                            class_logical_name = extract_class_logical_name_from_annotations(class_annotations) or ""
+                if class_declaration.extends:
+                    superclass_name = class_declaration.extends.name
+                    if superclass_name in import_map:
+                        classes[class_key].superclass = import_map[superclass_name]
+                    else:
+                        classes[class_key].superclass = f"{package_name}.{superclass_name}" if package_name else superclass_name
 
-                            # description 추출 시도 (rule002: @BxmCategory의 description 파라미터에서 추출)
-                            from csa.parsers.java.description import extract_class_description_from_annotations
-                            class_description = extract_class_description_from_annotations(class_annotations) or ""
-
-                            # LOC 메트릭 계산
-                            loc_metrics = calculate_loc(file_content)
-
-                            classes[class_key] = Class(
-                                name=class_name,
-                                logical_name=class_logical_name if class_logical_name else "",
-                                file_path=file_path,
-                                type=class_type,
-                                sub_type=sub_type,
-                                source=file_content,
-                                annotations=class_annotations,
-                                package_name=package_name,
-                                project_name=project_name,
-                                description=class_description if class_description else "",
-                                ai_description="",
-                                bxm_category=class_logical_name if class_logical_name else "",
-                                PLOC=loc_metrics.ploc,
-                                LLOC=loc_metrics.lloc,
-                                CLOC=loc_metrics.cloc,
-                                code_complexity=0  # 메서드와 필드 추가 후 재계산
-                            )
-                            class_to_package_map[class_key] = package_name
-                            logger.debug(f"Successfully added class to classes dict: {class_name} (key: {class_key})")
-                            
-                            # 진행 상황을 10% 단위로 표시
-                            processed_classes += 1
-                            current_percent = int((processed_classes / total_classes) * 100) if total_classes > 0 else 0
-                            
-                            if current_percent >= last_logged_percent + 10 or processed_classes == total_classes:
-                                last_logged_percent = current_percent
-                                logger.info(f"클래스 파싱 진행중 [{processed_classes}/{total_classes}] ({current_percent}%) - 최근: {class_name}")
+                if hasattr(class_declaration, 'implements') and class_declaration.implements:
+                    for impl_ref in class_declaration.implements:
+                        interface_name = impl_ref.name
+                        if interface_name in import_map:
+                            classes[class_key].interfaces.append(import_map[interface_name])
                         else:
-                            logger.debug(f"Class {class_name} already exists, skipping")
-                        
-                        for imp in tree.imports:
-                            classes[class_key].imports.append(imp.path)
+                            classes[class_key].interfaces.append(f"{package_name}.{interface_name}" if package_name else interface_name)
 
-                        if class_declaration.extends:
-                            superclass_name = class_declaration.extends.name
-                            if superclass_name in import_map:
-                                classes[class_key].superclass = import_map[superclass_name]
+                field_map = {}
+                for field_declaration in class_declaration.fields:
+                    for declarator in field_declaration.declarators:
+                        field_map[declarator.name] = field_declaration.type.name
+                        
+                        field_annotations = parse_annotations(field_declaration.annotations, "field") if hasattr(field_declaration, 'annotations') else []
+                        
+                        initial_value = ""
+                        if hasattr(declarator, 'initializer') and declarator.initializer:
+                            if hasattr(declarator.initializer, 'value'):
+                                initial_value = str(declarator.initializer.value)
+                            elif hasattr(declarator.initializer, 'type'):
+                                initial_value = str(declarator.initializer.type)
                             else:
-                                classes[class_key].superclass = f"{package_name}.{superclass_name}" if package_name else superclass_name
-
-                        if hasattr(class_declaration, 'implements') and class_declaration.implements:
-                            for impl_ref in class_declaration.implements:
-                                interface_name = impl_ref.name
-                                if interface_name in import_map:
-                                    classes[class_key].interfaces.append(import_map[interface_name])
-                                else:
-                                    classes[class_key].interfaces.append(f"{package_name}.{interface_name}" if package_name else interface_name)
-
-                        field_map = {}
-                        for field_declaration in class_declaration.fields:
-                            for declarator in field_declaration.declarators:
-                                field_map[declarator.name] = field_declaration.type.name
-                                
-                                field_annotations = parse_annotations(field_declaration.annotations, "field") if hasattr(field_declaration, 'annotations') else []
-                                
-                                initial_value = ""
-                                if hasattr(declarator, 'initializer') and declarator.initializer:
-                                    if hasattr(declarator.initializer, 'value'):
-                                        initial_value = str(declarator.initializer.value)
-                                    elif hasattr(declarator.initializer, 'type'):
-                                        initial_value = str(declarator.initializer.type)
-                                    else:
-                                        initial_value = str(declarator.initializer)
-                                
-                                # 필드 논리명 추출 시도
-                                from csa.services.java_parser_addon_r001 import extract_java_field_logical_name
-                                field_logical_name = extract_java_field_logical_name(file_content, declarator.name, project_name)
-                                
-                                prop = Field(
-                                    name=declarator.name,
-                                    logical_name=field_logical_name if field_logical_name else "",
-                                    type=field_declaration.type.name,
-                                    modifiers=list(field_declaration.modifiers),
-                                    package_name=package_name,
-                                    class_name=class_name,
-                                    annotations=field_annotations,
-                                    initial_value=initial_value,
-                                    description="",
-                                    ai_description=""
-                                )
-                                classes[class_key].properties.append(prop)
-
-                        all_declarations = class_declaration.methods + class_declaration.constructors
+                                initial_value = str(declarator.initializer)
                         
-                        for declaration in all_declarations:
-                            local_var_map = field_map.copy()
-                            params = []
-                            for param in declaration.parameters:
-                                param_type_name = 'Unknown'
-                                if param.type:
-                                    # ReferenceType의 경우 - 내부 클래스 지원
-                                    if hasattr(param.type, 'sub_type') and param.type.sub_type:
-                                        # PaymentDto.RefundRequest 형태
-                                        param_type_name = f"{param.type.name}.{param.type.sub_type.name}"
-                                    elif hasattr(param.type, 'name') and param.type.name:
-                                        # 일반 타입
-                                        param_type_name = param.type.name
-                                local_var_map[param.name] = param_type_name
-                                params.append(Field(name=param.name, logical_name=f"{package_name}.{class_name}.{param.name}", type=param_type_name, package_name=package_name, class_name=class_name))
-
-                            if declaration.body:
-                                for _, var_decl in declaration.filter(javalang.tree.LocalVariableDeclaration):
-                                    for declarator in var_decl.declarators:
-                                        local_var_map[declarator.name] = var_decl.type.name
-                            
-                            if isinstance(declaration, javalang.tree.MethodDeclaration):
-                                return_type = declaration.return_type.name if declaration.return_type else "void"
-                            else:
-                                return_type = "constructor"
-
-                            modifiers = list(declaration.modifiers)
-                            method_annotations = parse_annotations(declaration.annotations, "method") if hasattr(declaration, 'annotations') else []
-
-                            method_source = ""
-                            if declaration.position:
-                                lines = file_content.splitlines(keepends=True)
-                                start_line = declaration.position.line - 1
-                                
-                                brace_count = 0
-                                end_line = start_line
-                                for i in range(start_line, len(lines)):
-                                    line = lines[i]
-                                    for char in line:
-                                        if char == '{':
-                                            brace_count += 1
-                                        elif char == '}':
-                                            brace_count -= 1
-                                            if brace_count == 0:
-                                                end_line = i
-                                                break
-                                    if brace_count == 0:
-                                        break
-                                
-                                method_source = "".join(lines[start_line:end_line + 1])
-
-                            # 논리명 추출 시도 (rule001: @BxmCategory의 logicalName 파라미터에서 추출)
-                            from csa.services.java_parser_addon_r001 import extract_method_logical_name_from_annotations
-                            method_logical_name = extract_method_logical_name_from_annotations(method_annotations) or ""
-
-                            # description 추출 시도 (rule002: @BxmCategory의 description 파라미터에서 추출)
-                            from csa.parsers.java.description import extract_method_description_from_annotations
-                            method_description = extract_method_description_from_annotations(method_annotations) or ""
-
-                            method = Method(
-                                name=declaration.name,
-                                logical_name=method_logical_name if method_logical_name else "",
-                                return_type=return_type,
-                                parameters=params,
-                                modifiers=modifiers,
-                                source=method_source,
-                                package_name=package_name,
-                                annotations=method_annotations,
-                                description=method_description if method_description else "",
-                                ai_description=""
-                            )
-                            classes[class_key].methods.append(method)
-
-                            # Step 1: 로그 메서드가 있는 라인 번호 수집 (더 포괄적으로)
-                            log_lines = set()
-                            for _, invocation in declaration.filter(javalang.tree.MethodInvocation):
-                                # 로그 메서드 감지 (더 포괄적)
-                                is_log_method = False
-                                
-                                # log.info, logger.debug 등
-                                if invocation.qualifier and invocation.qualifier in ['log', 'logger', 'LOGGER']:
-                                    if hasattr(invocation, 'member') and invocation.member in ['info', 'debug', 'warn', 'error', 'trace']:
-                                        is_log_method = True
-                                
-                                # System.out.println, System.err.println
-                                elif invocation.qualifier and invocation.qualifier in ['System']:
-                                    if hasattr(invocation, 'member') and invocation.member in ['out', 'err']:
-                                        is_log_method = True
-                                
-                                # println 메서드 직접 호출
-                                elif hasattr(invocation, 'member') and invocation.member in ['println', 'print']:
-                                    is_log_method = True
-                                
-                                if is_log_method and invocation.position:
-                                    # 로그 메서드가 있는 라인과 인접한 라인들도 포함 (멀티라인 로그 지원)
-                                    log_line = invocation.position.line
-                                    log_lines.add(log_line)
-                                    log_lines.add(log_line + 1)  # 다음 라인도 포함
-
-                            # Step 2: 메서드 호출 추출 (로그 라인 제외)
-                            call_order = 0
-                            for _, invocation in declaration.filter(javalang.tree.MethodInvocation):
-                                # position이 없는 호출은 건너뛰기 (순서를 알 수 없음)
-                                if not invocation.position:
-                                    continue
-                                
-                                # 로그 라인에 있는 모든 메서드 호출 제외
-                                if invocation.position.line in log_lines:
-                                    continue
-                                
-                                # 로그 메서드 자체 제외
-                                if invocation.qualifier and invocation.qualifier in ['log', 'logger', 'LOGGER']:
-                                    if hasattr(invocation, 'member') and invocation.member in ['info', 'debug', 'warn', 'error', 'trace']:
-                                        continue
-                                    
-                                target_class_name = None
-                                resolved_target_package = ""
-                                resolved_target_class_name = ""
-                                
-                                if invocation.qualifier:
-                                    if invocation.qualifier in local_var_map:
-                                        target_class_name = local_var_map[invocation.qualifier]
-                                    else:
-                                        target_class_name = invocation.qualifier
-                                    
-                                    if target_class_name:
-                                        if target_class_name == "System.out":
-                                            resolved_target_package = "java.io"
-                                            resolved_target_class_name = "PrintStream"
-                                        else:
-                                            if invocation.qualifier in local_var_map:
-                                                resolved_target_class_name = target_class_name
-                                                if target_class_name in import_map:
-                                                    resolved_target_package = ".".join(import_map[target_class_name].split(".")[:-1])
-                                                else:
-                                                    # import_map에 없으면 현재 패키지만 사용
-                                                    # (잘못된 패키지 추론 로직 제거)
-                                                    resolved_target_package = package_name
-                                                
-                                                if '<' in target_class_name:
-                                                    base_type = target_class_name.split('<')[0]
-                                                    resolved_target_class_name = base_type
-                                            else:
-                                                if target_class_name in import_map:
-                                                    resolved_target_package = ".".join(import_map[target_class_name].split(".")[:-1])
-                                                else:
-                                                    resolved_target_package = package_name
-                                                resolved_target_class_name = target_class_name
-                                else:
-                                    resolved_target_package = package_name
-                                    resolved_target_class_name = class_name
-
-                                if resolved_target_class_name:
-                                    method_name = invocation.member
-                                    if method_name in {'collect', 'map', 'filter', 'forEach', 'stream', 'reduce', 'findFirst', 'findAny', 'anyMatch', 'allMatch', 'noneMatch', 'count', 'distinct', 'sorted', 'limit', 'skip', 'peek', 'flatMap', 'toArray'}:
-                                        continue
-                                        
-                                    line_number = invocation.position.line if invocation.position else 0
-
-                                    call = MethodCall(
-                                        source_package=package_name,
-                                        source_class=class_name,
-                                        source_method=declaration.name,
-                                        target_package=resolved_target_package,
-                                        target_class=resolved_target_class_name,
-                                        target_method=invocation.member,
-                                        call_order=call_order,
-                                        line_number=line_number,
-                                        return_type="void"
-                                    )
-                                    classes[class_key].calls.append(call)
-                                    call_order += 1
+                        # 필드 논리명 추출 시도
+                        from csa.services.java_parser_addon_r001 import extract_java_field_logical_name
+                        field_logical_name = extract_java_field_logical_name(file_content, declarator.name, project_name)
                         
-                        has_data_annotation = any(ann.name == "Data" for ann in classes[class_key].annotations)
-                        if has_data_annotation:
-                            logger.debug(f"Found @Data annotation on {class_name}, generating Lombok methods")
-                            lombok_methods = generate_lombok_methods(classes[class_key].properties, class_name, package_name)
-                            classes[class_key].methods.extend(lombok_methods)
-                            logger.debug(f"Generated {len(lombok_methods)} Lombok methods for {class_name}")
-                    
-                    processed_file_count += 1
-                    logger.debug(f"Successfully processed file: {file_path}")
-                    
-                    # Rule001 논리명 추출 로직 제거 - 이미 파싱 시 처리됨
+                        prop = Field(
+                            name=declarator.name,
+                            logical_name=field_logical_name if field_logical_name else "",
+                            type=field_declaration.type.name,
+                            modifiers=list(field_declaration.modifiers),
+                            package_name=package_name,
+                            class_name=class_name,
+                            annotations=field_annotations,
+                            initial_value=initial_value,
+                            description="",
+                            ai_description=""
+                        )
+                        classes[class_key].properties.append(prop)
+
+                all_declarations = class_declaration.methods + class_declaration.constructors
                 
-                except Exception as e:
+                for declaration in all_declarations:
+                    local_var_map = field_map.copy()
+                    params = []
+                    for param in declaration.parameters:
+                        param_type_name = 'Unknown'
+                        if param.type:
+                            # ReferenceType의 경우 - 내부 클래스 지원
+                            if hasattr(param.type, 'sub_type') and param.type.sub_type:
+                                # PaymentDto.RefundRequest 형태
+                                param_type_name = f"{param.type.name}.{param.type.sub_type.name}"
+                            elif hasattr(param.type, 'name') and param.type.name:
+                                # 일반 타입
+                                param_type_name = param.type.name
+                        local_var_map[param.name] = param_type_name
+                        params.append(Field(name=param.name, logical_name=f"{package_name}.{class_name}.{param.name}", type=param_type_name, package_name=package_name, class_name=class_name))
+
+                    if declaration.body:
+                        for _, var_decl in declaration.filter(javalang.tree.LocalVariableDeclaration):
+                            for declarator in var_decl.declarators:
+                                local_var_map[declarator.name] = var_decl.type.name
+                    
+                    if isinstance(declaration, javalang.tree.MethodDeclaration):
+                        return_type = declaration.return_type.name if declaration.return_type else "void"
+                    else:
+                        return_type = "constructor"
+
+                    modifiers = list(declaration.modifiers)
+                    method_annotations = parse_annotations(declaration.annotations, "method") if hasattr(declaration, 'annotations') else []
+
+                    method_source = ""
+                    if declaration.position:
+                        lines = file_content.splitlines(keepends=True)
+                        start_line = declaration.position.line - 1
+                        
+                        brace_count = 0
+                        end_line = start_line
+                        for i in range(start_line, len(lines)):
+                            line = lines[i]
+                            for char in line:
+                                if char == '{':
+                                    brace_count += 1
+                                elif char == '}':
+                                    brace_count -= 1
+                                    if brace_count == 0:
+                                        end_line = i
+                                        break
+                            if brace_count == 0:
+                                break
+                        
+                        method_source = "".join(lines[start_line:end_line + 1])
+
+                    # 논리명 추출 시도 (rule001: @BxmCategory의 logicalName 파라미터에서 추출)
+                    from csa.services.java_parser_addon_r001 import extract_method_logical_name_from_annotations
+                    method_logical_name = extract_method_logical_name_from_annotations(method_annotations) or ""
+
+                    # description 추출 시도 (rule002: @BxmCategory의 description 파라미터에서 추출)
+                    from csa.parsers.java.description import extract_method_description_from_annotations
+                    method_description = extract_method_description_from_annotations(method_annotations) or ""
+
+                    method = Method(
+                        name=declaration.name,
+                        logical_name=method_logical_name if method_logical_name else "",
+                        return_type=return_type,
+                        parameters=params,
+                        modifiers=modifiers,
+                        source=method_source,
+                        package_name=package_name,
+                        annotations=method_annotations,
+                        description=method_description if method_description else "",
+                        ai_description=""
+                    )
+                    classes[class_key].methods.append(method)
+
+                    # Step 1: 로그 메서드가 있는 라인 번호 수집 (더 포괄적으로)
+                    log_lines = set()
+                    for _, invocation in declaration.filter(javalang.tree.MethodInvocation):
+                        # 로그 메서드 감지 (더 포괄적)
+                        is_log_method = False
+                        
+                        # log.info, logger.debug 등
+                        if invocation.qualifier and invocation.qualifier in ['log', 'logger', 'LOGGER']:
+                            if hasattr(invocation, 'member') and invocation.member in ['info', 'debug', 'warn', 'error', 'trace']:
+                                is_log_method = True
+                        
+                        # System.out.println, System.err.println
+                        elif invocation.qualifier and invocation.qualifier in ['System']:
+                            if hasattr(invocation, 'member') and invocation.member in ['out', 'err']:
+                                is_log_method = True
+                        
+                        # println 메서드 직접 호출
+                        elif hasattr(invocation, 'member') and invocation.member in ['println', 'print']:
+                            is_log_method = True
+                        
+                        if is_log_method and invocation.position:
+                            # 로그 메서드가 있는 라인과 인접한 라인들도 포함 (멀티라인 로그 지원)
+                            log_line = invocation.position.line
+                            log_lines.add(log_line)
+                            log_lines.add(log_line + 1)  # 다음 라인도 포함
+
+                    # Step 2: 메서드 호출 추출 (로그 라인 제외)
+                    call_order = 0
+                    for _, invocation in declaration.filter(javalang.tree.MethodInvocation):
+                        # position이 없는 호출은 건너뛰기 (순서를 알 수 없음)
+                        if not invocation.position:
+                            continue
+                        
+                        # 로그 라인에 있는 모든 메서드 호출 제외
+                        if invocation.position.line in log_lines:
+                            continue
+                        
+                        # 로그 메서드 자체 제외
+                        if invocation.qualifier and invocation.qualifier in ['log', 'logger', 'LOGGER']:
+                            if hasattr(invocation, 'member') and invocation.member in ['info', 'debug', 'warn', 'error', 'trace']:
+                                continue
+                            
+                        target_class_name = None
+                        resolved_target_package = ""
+                        resolved_target_class_name = ""
+                        
+                        if invocation.qualifier:
+                            if invocation.qualifier in local_var_map:
+                                target_class_name = local_var_map[invocation.qualifier]
+                            else:
+                                target_class_name = invocation.qualifier
+                            
+                            if target_class_name:
+                                if target_class_name == "System.out":
+                                    resolved_target_package = "java.io"
+                                    resolved_target_class_name = "PrintStream"
+                                else:
+                                    if invocation.qualifier in local_var_map:
+                                        resolved_target_class_name = target_class_name
+                                        if target_class_name in import_map:
+                                            resolved_target_package = ".".join(import_map[target_class_name].split(".")[:-1])
+                                        else:
+                                            # import_map에 없으면 현재 패키지만 사용
+                                            # (잘못된 패키지 추론 로직 제거)
+                                            resolved_target_package = package_name
+                                        
+                                        if '<' in target_class_name:
+                                            base_type = target_class_name.split('<')[0]
+                                            resolved_target_class_name = base_type
+                                    else:
+                                        if target_class_name in import_map:
+                                            resolved_target_package = ".".join(import_map[target_class_name].split(".")[:-1])
+                                        else:
+                                            resolved_target_package = package_name
+                                        resolved_target_class_name = target_class_name
+                        else:
+                            resolved_target_package = package_name
+                            resolved_target_class_name = class_name
+
+                        if resolved_target_class_name:
+                            method_name = invocation.member
+                            if method_name in {'collect', 'map', 'filter', 'forEach', 'stream', 'reduce', 'findFirst', 'findAny', 'anyMatch', 'allMatch', 'noneMatch', 'count', 'distinct', 'sorted', 'limit', 'skip', 'peek', 'flatMap', 'toArray'}:
+                                continue
+                                
+                            line_number = invocation.position.line if invocation.position else 0
+
+                            call = MethodCall(
+                                source_package=package_name,
+                                source_class=class_name,
+                                source_method=declaration.name,
+                                target_package=resolved_target_package,
+                                target_class=resolved_target_class_name,
+                                target_method=invocation.member,
+                                call_order=call_order,
+                                line_number=line_number,
+                                return_type="void"
+                            )
+                            classes[class_key].calls.append(call)
+                            call_order += 1
+                
+                has_data_annotation = any(ann.name == "Data" for ann in classes[class_key].annotations)
+                if has_data_annotation:
+                    logger.debug(f"Found @Data annotation on {class_name}, generating Lombok methods")
+                    lombok_methods = generate_lombok_methods(classes[class_key].properties, class_name, package_name)
+                    classes[class_key].methods.extend(lombok_methods)
+                    logger.debug(f"Generated {len(lombok_methods)} Lombok methods for {class_name}")
+            
+            processed_file_count += 1
+            logger.debug(f"Successfully processed file: {file_path}")
+            
+            # Rule001 논리명 추출 로직 제거 - 이미 파싱 시 처리됨
+                
+        except Exception as e:
                     logger.error(f"Error processing file {file_path}: {e}")
                     continue
     
@@ -1381,11 +1381,7 @@ def parse_java_project_streaming(
 
     # 1회 스캔: 모든 .java 파일 경로 수집
     logger.info("Java 파일 수집 중...")
-    java_files = []
-    for root, _, files in os.walk(directory):
-        for file in files:
-            if file.endswith(".java"):
-                java_files.append(os.path.join(root, file))
+    java_files = _collect_java_files_with_csaignore(directory)
 
     total_files = len(java_files)
     stats['total_files'] = total_files
@@ -1765,6 +1761,38 @@ def parse_java_project_streaming(
     logger.info(f"  - SQL Statements: {stats['sql_statements']}")
 
     return stats
+
+
+def _collect_java_files_with_csaignore(directory: str) -> list[str]:
+    """
+    디렉터리에서 .java 파일을 수집하고 .csaignore 필터를 적용합니다.
+
+    Args:
+        directory: Java 소스 디렉터리 경로
+
+    Returns:
+        list[str]: 필터링된 Java 파일 경로 목록
+    """
+    logger = get_logger(__name__)
+
+    # 모든 .java 파일 수집
+    java_files = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.endswith(".java"):
+                java_files.append(os.path.join(root, file))
+
+    # .csaignore 필터 적용
+    csaignore_filter = load_csaignore_filter(os.getcwd())
+    if csaignore_filter.has_patterns():
+        logger.info(".csaignore 패턴 적용 중...")
+        original_count = len(java_files)
+        java_files = csaignore_filter.filter_files(java_files)
+        excluded_count = original_count - len(java_files)
+        if excluded_count > 0:
+            logger.info(f".csaignore로 {excluded_count}개 파일 제외됨")
+
+    return java_files
 
 
 def parse_java_project(directory: str, graph_db: GraphDB = None) -> list[Class]:
