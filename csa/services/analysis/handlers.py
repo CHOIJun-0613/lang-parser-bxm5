@@ -26,6 +26,7 @@ def _prepare_database(
     neo4j_user: str,
     neo4j_password: Optional[str],
     neo4j_database: str,
+    project_name: str,
     logger,
 ) -> Optional[GraphDB]:
     """Initialise GraphDB connection and perform optional cleanup."""
@@ -43,17 +44,17 @@ def _prepare_database(
         # clean_database()로 데이터만 삭제되고 인덱스는 남음
 
         if all_objects:
-            logger.info("Cleaning all database objects...")
-            db.clean_database()
-            logger.info("All database objects cleaned successfully")
+            logger.info(f"Cleaning all objects for project '{project_name}'...")
+            db.clean_database(project_name)
+            logger.info(f"All objects for project '{project_name}' cleaned successfully")
         elif java_object:
-            logger.info("Cleaning Java objects only...")
-            db.clean_java_objects()
-            logger.info("Java objects cleaned successfully")
+            logger.info(f"Cleaning Java objects for project '{project_name}'...")
+            db.clean_java_objects(project_name)
+            logger.info(f"Java objects for project '{project_name}' cleaned successfully")
         elif db_object:
-            logger.info("Cleaning DB objects only...")
-            db.clean_db_objects()
-            logger.info("DB objects cleaned successfully")
+            logger.info(f"Cleaning DB objects for project '{project_name}'...")
+            db.clean_db_objects(project_name)
+            logger.info(f"DB objects for project '{project_name}' cleaned successfully")
 
     # 인덱스 확인 및 생성 (없으면 생성, 있으면 건너뜀)
     # 데이터 저장 전에 실행하여 MERGE 성능 보장
@@ -161,6 +162,7 @@ def analyze_project(
             neo4j_user,
             neo4j_password,
             neo4j_database,
+            project_name,
             logger,
         )
 

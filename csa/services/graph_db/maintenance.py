@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from csa.services.graph_db.indexes import IndexManager
 
 
@@ -108,33 +110,86 @@ class MaintenanceMixin:
         """
         tx.run(delete_class_query, class_name=class_name, project_name=project_name)
 
-    def clean_java_objects(self) -> None:
-        """Remove Java-related nodes from the graph."""
-        with self._driver.session(database=self._database) as session:
-            session.run("MATCH (n:Package) DETACH DELETE n")
-            session.run("MATCH (n:Class) DETACH DELETE n")
-            session.run("MATCH (n:Method) DETACH DELETE n")
-            session.run("MATCH (n:Field) DETACH DELETE n")
-            session.run("MATCH (n:Bean) DETACH DELETE n")
-            session.run("MATCH (n:Endpoint) DETACH DELETE n")
-            session.run("MATCH (n:MyBatisMapper) DETACH DELETE n")
-            session.run("MATCH (n:SqlStatement) DETACH DELETE n")
-            session.run("MATCH (n:JpaEntity) DETACH DELETE n")
-            session.run("MATCH (n:JpaRepository) DETACH DELETE n")
-            session.run("MATCH (n:JpaQuery) DETACH DELETE n")
-            session.run("MATCH (n:ConfigFile) DETACH DELETE n")
-            session.run("MATCH (n:TestClass) DETACH DELETE n")
+    def clean_java_objects(self, project_name: Optional[str] = None) -> None:
+        """
+        Remove Java-related nodes from the graph.
 
-    def clean_db_objects(self) -> None:
-        """Remove database metadata nodes from the graph."""
+        Args:
+            project_name: If provided, only delete Java nodes related to this project.
+                         If None, delete all Java nodes (backward compatibility).
+        """
         with self._driver.session(database=self._database) as session:
-            session.run("MATCH (n:Database) DETACH DELETE n")
-            session.run("MATCH (n:Table) DETACH DELETE n")
-            session.run("MATCH (n:Column) DETACH DELETE n")
-            session.run("MATCH (n:Index) DETACH DELETE n")
-            session.run("MATCH (n:Constraint) DETACH DELETE n")
+            if project_name:
+                # 프로젝트별 삭제
+                session.run("MATCH (n:Package {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
+                session.run("MATCH (n:Class {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
+                session.run("MATCH (n:Method {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
+                session.run("MATCH (n:Field {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
+                session.run("MATCH (n:Bean {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
+                session.run("MATCH (n:Endpoint {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
+                session.run("MATCH (n:MyBatisMapper {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
+                session.run("MATCH (n:SqlStatement {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
+                session.run("MATCH (n:JpaEntity {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
+                session.run("MATCH (n:JpaRepository {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
+                session.run("MATCH (n:JpaQuery {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
+                session.run("MATCH (n:ConfigFile {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
+                session.run("MATCH (n:TestClass {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
+            else:
+                # 전체 삭제 (기존 로직)
+                session.run("MATCH (n:Package) DETACH DELETE n")
+                session.run("MATCH (n:Class) DETACH DELETE n")
+                session.run("MATCH (n:Method) DETACH DELETE n")
+                session.run("MATCH (n:Field) DETACH DELETE n")
+                session.run("MATCH (n:Bean) DETACH DELETE n")
+                session.run("MATCH (n:Endpoint) DETACH DELETE n")
+                session.run("MATCH (n:MyBatisMapper) DETACH DELETE n")
+                session.run("MATCH (n:SqlStatement) DETACH DELETE n")
+                session.run("MATCH (n:JpaEntity) DETACH DELETE n")
+                session.run("MATCH (n:JpaRepository) DETACH DELETE n")
+                session.run("MATCH (n:JpaQuery) DETACH DELETE n")
+                session.run("MATCH (n:ConfigFile) DETACH DELETE n")
+                session.run("MATCH (n:TestClass) DETACH DELETE n")
 
-    def clean_database(self) -> None:
-        """Delete every node and relationship from the database."""
+    def clean_db_objects(self, project_name: Optional[str] = None) -> None:
+        """
+        Remove database metadata nodes from the graph.
+
+        Args:
+            project_name: If provided, only delete DB nodes related to this project.
+                         If None, delete all DB nodes (backward compatibility).
+        """
         with self._driver.session(database=self._database) as session:
-            session.run("MATCH (n) DETACH DELETE n")
+            if project_name:
+                # 프로젝트별 삭제
+                session.run("MATCH (n:Database {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
+                session.run("MATCH (n:Table {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
+                session.run("MATCH (n:Column {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
+                session.run("MATCH (n:Index {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
+                session.run("MATCH (n:Constraint {project_name: $project_name}) DETACH DELETE n", project_name=project_name)
+            else:
+                # 전체 삭제 (기존 로직)
+                session.run("MATCH (n:Database) DETACH DELETE n")
+                session.run("MATCH (n:Table) DETACH DELETE n")
+                session.run("MATCH (n:Column) DETACH DELETE n")
+                session.run("MATCH (n:Index) DETACH DELETE n")
+                session.run("MATCH (n:Constraint) DETACH DELETE n")
+
+    def clean_database(self, project_name: Optional[str] = None) -> None:
+        """
+        Delete nodes and relationships from the database.
+
+        Args:
+            project_name: If provided, only delete nodes related to this project.
+                         If None, delete all nodes (backward compatibility).
+        """
+        with self._driver.session(database=self._database) as session:
+            if project_name:
+                # 프로젝트별 삭제 - Project 노드와 연결된 모든 노드 삭제
+                session.run("""
+                    MATCH (proj:Project {name: $project_name})
+                    OPTIONAL MATCH (proj)-[*]-(n)
+                    DETACH DELETE proj, n
+                """, project_name=project_name)
+            else:
+                # 전체 삭제 (기존 로직)
+                session.run("MATCH (n) DETACH DELETE n")

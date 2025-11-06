@@ -31,7 +31,7 @@ class JavaAnalysisStats(BaseModel):
     sql_statements: int = 0
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
-    metadata: Dict[str, int] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
     @property
     def duration_seconds(self) -> Optional[float]:
@@ -52,7 +52,7 @@ class DatabaseAnalysisStats(BaseModel):
     constraints: int = 0
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
-    metadata: Dict[str, int] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
     @property
     def duration_seconds(self) -> Optional[float]:
