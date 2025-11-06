@@ -457,11 +457,17 @@ def extract_mybatis_mappers_from_classes(classes: list[Class]) -> list[MyBatisMa
             }
             sql_statements.append(sql_statement)
         
+        # Extract file extension from file_path
+        file_extension = ""
+        if cls.file_path and "." in cls.file_path:
+            file_extension = cls.file_path.split(".")[-1]
+
         # Create mapper
         mapper = MyBatisMapper(
             name=cls.name,
             logical_name="",
             type="interface",
+            file_extension=file_extension,
             namespace=f"{cls.package_name}.{cls.name}",
             methods=mapper_methods,
             sql_statements=sql_statements,
@@ -513,6 +519,7 @@ def parse_mybatis_xml_file(file_path: str) -> MyBatisMapper:
             statement_id = statement.get("id")
             tag_name = statement.tag.lower()
             
+            # XML 태그 기반 초기 SQL 타입 설정
             sql_type = "SELECT"
             if tag_name == "insert":
                 sql_type = "INSERT"
@@ -520,7 +527,7 @@ def parse_mybatis_xml_file(file_path: str) -> MyBatisMapper:
                 sql_type = "UPDATE"
             elif tag_name == "delete":
                 sql_type = "DELETE"
-            
+
             # SQL 내용 추출 - CDATA와 하위 요소들 포함
             sql_content = ""
             if statement.text:
@@ -540,7 +547,32 @@ def parse_mybatis_xml_file(file_path: str) -> MyBatisMapper:
                 sql_content = ET.tostring(statement, encoding='unicode', method='text').strip()
             
             sql_content = sql_content.strip()
-            
+
+            # SQL 내용 기반 타입 재검증 및 자동 수정
+            if sql_content:
+                sql_upper = sql_content.strip().upper()
+                detected_type = None
+
+                # SQL 내용의 첫 번째 키워드 확인
+                if sql_upper.startswith('INSERT'):
+                    detected_type = 'INSERT'
+                elif sql_upper.startswith('UPDATE'):
+                    detected_type = 'UPDATE'
+                elif sql_upper.startswith('DELETE'):
+                    detected_type = 'DELETE'
+                elif sql_upper.startswith('SELECT') or sql_upper.startswith('WITH'):
+                    detected_type = 'SELECT'
+
+                # 태그와 내용이 불일치하면 경고 로그 + 내용 기반으로 수정
+                if detected_type and detected_type != sql_type:
+                    logger.warning(
+                        f"SQL type mismatch in mapper '{namespace}', statement '{statement_id}': "
+                        f"XML tag=<{tag_name}> but SQL content starts with {detected_type}. "
+                        f"Using detected type: {detected_type}. "
+                        f"SQL preview: {sql_content[:100]}"
+                    )
+                    sql_type = detected_type
+
             parameter_type = statement.get("parameterType", "")
             result_type = statement.get("resultType", "")
             result_map = statement.get("resultMap", "")
@@ -587,11 +619,17 @@ def parse_mybatis_xml_file(file_path: str) -> MyBatisMapper:
         # Create mapper
         mapper_name = namespace.split(".")[-1] if namespace else os.path.basename(file_path).replace(".xml", "")
         package_name = ".".join(namespace.split(".")[:-1]) if namespace else ""
-        
+
+        # Extract file extension from file_path
+        file_extension = ""
+        if file_path and "." in file_path:
+            file_extension = file_path.split(".")[-1]
+
         mapper = MyBatisMapper(
             name=mapper_name,
             logical_name=mapper_logical_name if mapper_logical_name else "",
             type="xml",
+            file_extension=file_extension,
             namespace=namespace,
             methods=[],  # XML mappers don't have Java methods
             sql_statements=sql_statements,

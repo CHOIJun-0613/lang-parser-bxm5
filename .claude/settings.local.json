@@ -18,7 +18,13 @@
       "Bash(.venvScriptspython.exe -m pytest tests/unit/test_method_complexity.py -v)",
       "Bash(type \"Java 파일 복잡도 산정(2025-11-04).md\")",
       "Bash(.venvScriptspython.exe -m pytest tests/unit/test_class_subtype.py -v)",
-      "Bash(d:workspaceslang-parser-worklang-parser-bxm5.venvScriptspython.exe -m pytest tests/unit/test_class_subtype.py -v)"
+      "Bash(d:workspaceslang-parser-worklang-parser-bxm5.venvScriptspython.exe -m pytest tests/unit/test_class_subtype.py -v)",
+      "Bash(test_insert_output.txt)",
+      "Bash(dir:*)",
+      "Bash(more:*)",
+      "Bash(d:workspaceslang-parser-worklang-parser-bxm5.venvScriptspython.exe -m pytest tests/unit/test_sql_parser.py -v)",
+      "Bash(.venvScriptspython.exe -m pytest tests/unit/test_sql_parser.py -v)",
+      "Bash(d:workspaceslang-parser-worklang-parser-bxm5.venvScriptspython.exe -m pytest tests/unit/test_mybatis_file_extension.py -v)"
     ],
     "deny": [],
     "ask": []

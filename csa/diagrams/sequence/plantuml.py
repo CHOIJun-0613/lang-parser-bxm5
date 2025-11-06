@@ -239,13 +239,14 @@ class PlantUMLDiagramGenerator:
 
             if call_type == 'sql':
                 sql_participant_required = True
-                # Mapper participant 표시: <<namespace>>\nMapperName.xml
+                # Mapper participant 표시: <<namespace>>\nMapperName.file_extension
                 mapper_name = call.get('mapper_name') or 'SQL'
                 mapper_namespace = call.get('mapper_namespace') or ''
+                mapper_file_extension = call.get('mapper_file_extension') or 'xml'
                 if mapper_namespace:
-                    sql_display_label = f"<<{mapper_namespace}>>\\n{mapper_name}.xml"
+                    sql_display_label = f"<<{mapper_namespace}>>\\n{mapper_name}.{mapper_file_extension}"
                 else:
-                    sql_display_label = f"{mapper_name}.xml"
+                    sql_display_label = f"{mapper_name}.{mapper_file_extension}"
             elif call_type == 'table':
                 if target_class:
                     schema_value = call.get('table_schema') or target_package or ''

@@ -88,7 +88,8 @@ class PersistenceMixin:
         current_timestamp = GraphDBBase._get_current_timestamp()
         mapper_query = (
             "MERGE (m:MyBatisMapper {name: $name, project_name: $project_name}) "
-            "SET m.logical_name = $logical_name, m.type = $type, m.namespace = $namespace, m.methods = $methods, "
+            "SET m.logical_name = $logical_name, m.type = $type, m.file_extension = $file_extension, "
+            "m.namespace = $namespace, m.methods = $methods, "
             "m.sql_statements = $sql_statements, m.file_path = $file_path, "
             "m.package_name = $package_name, m.description = $description, m.ai_description = $ai_description, "
             "m.updated_at = $updated_at"
@@ -99,6 +100,7 @@ class PersistenceMixin:
             logical_name=mapper.logical_name or "",
             project_name=project_name,
             type=mapper.type,
+            file_extension=mapper.file_extension or "",
             namespace=mapper.namespace,
             methods=json.dumps(mapper.methods),
             sql_statements=json.dumps(mapper.sql_statements),
@@ -280,6 +282,7 @@ class PersistenceMixin:
             "MERGE (mapper:MyBatisMapper {name: m.name, project_name: m.project_name}) "
             "SET mapper.logical_name = m.logical_name, "
             "mapper.type = m.type, "
+            "mapper.file_extension = m.file_extension, "
             "mapper.namespace = m.namespace, "
             "mapper.methods = m.methods, "
             "mapper.sql_statements = m.sql_statements, "
@@ -295,6 +298,7 @@ class PersistenceMixin:
                 'logical_name': mapper.logical_name or "",
                 'project_name': project_name,
                 'type': mapper.type,
+                'file_extension': mapper.file_extension or "",
                 'namespace': mapper.namespace,
                 'methods': json.dumps(mapper.methods),
                 'sql_statements': json.dumps(mapper.sql_statements),
