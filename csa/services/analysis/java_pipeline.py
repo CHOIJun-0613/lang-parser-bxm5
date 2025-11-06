@@ -122,8 +122,8 @@ def _analyze_with_streaming(
         sql_statements=[],
         project_name=final_project_name,
         metadata={
-            'start_time': start_time,
-            'end_time': end_time,
+            'start_time': start_time.isoformat(),
+            'end_time': end_time.isoformat(),
             'total_files': stats.get('total_files', 0),
             'processed_files': stats.get('processed_files', 0),
         },

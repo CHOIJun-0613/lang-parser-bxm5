@@ -8,6 +8,7 @@ import os
 import re
 import time
 import psutil
+import multiprocessing
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from queue import Queue
 from threading import Lock
@@ -1434,8 +1435,11 @@ def parse_java_project_streaming(
         file_name = os.path.basename(file_path)
         logger.info(f"  {i}. {file_name} (복잡도: {complexity})")
 
-    # 환경 변수에서 병렬 워커 수 가져오기 (기본값 8)
-    parallel_workers = int(os.getenv("JAVA_PARSE_WORKERS", str(parallel_workers)))
+    # 환경 변수에서 병렬 워커 수 가져오기 (CPU 코어 수 기반 자동 설정)
+    # 기본값: max(4, CPU 코어수 - 2) - 최소 4개, 최대 (코어수-2)개
+    cpu_count = multiprocessing.cpu_count()
+    default_workers = max(4, cpu_count - 2)
+    parallel_workers = int(os.getenv("JAVA_PARSE_WORKERS", str(default_workers)))
     initial_batch_size = int(os.getenv("NEO4J_BATCH_SIZE", "50"))  # 초기 배치 크기
 
     # 동적 배치 크기 조정기 초기화
@@ -1445,7 +1449,7 @@ def parse_java_project_streaming(
         max_size=200
     )
 
-    logger.info(f"병렬 파싱 워커 수: {parallel_workers}, 초기 배치 크기: {initial_batch_size} (동적 조정 활성화)")
+    logger.info(f"병렬 파싱 워커 수: {parallel_workers} (CPU 코어: {cpu_count}, 기본값: {default_workers}), 초기 배치 크기: {initial_batch_size} (동적 조정 활성화)")
 
     # 0. Package 사전 생성 (성능 최적화)
     logger.info("Package 정보 수집 중...")

@@ -658,8 +658,11 @@ def save_java_objects_to_neo4j(
 
     java_end_time = datetime.now()
     if streaming_mode:
-        start_time = metadata.get("start_time") or java_start_time
-        end_time = metadata.get("end_time") or java_end_time
+        # metadata의 시간은 ISO 형식 문자열이므로 datetime으로 변환
+        start_time_str = metadata.get("start_time")
+        end_time_str = metadata.get("end_time")
+        start_time = datetime.fromisoformat(start_time_str) if start_time_str else java_start_time
+        end_time = datetime.fromisoformat(end_time_str) if end_time_str else java_end_time
         java_stats = get_java_stats_from_neo4j(
             db,
             project_name,
