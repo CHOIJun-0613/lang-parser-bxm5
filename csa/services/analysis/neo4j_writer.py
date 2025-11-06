@@ -12,7 +12,7 @@ from typing import Optional, Sequence
 from csa.cli.core.lifecycle import format_duration
 from csa.models.analysis import JavaAnalysisArtifacts, JavaAnalysisStats
 from csa.models.graph_entities import Project
-from csa.services.analysis.summary import calculate_java_statistics
+from csa.services.analysis.summary import calculate_java_statistics, get_java_stats_from_neo4j
 from csa.services.graph_db import GraphDB
 from csa.utils.project_statistics import calculate_project_statistics
 from csa.services.java_parser import (
@@ -542,22 +542,28 @@ def save_java_objects_to_neo4j(
 ) -> JavaAnalysisStats:
     """Persist Java analysis artifacts to Neo4j and return corresponding stats."""
     java_start_time = datetime.now()
-
-    java_stats = calculate_java_statistics(
-        artifacts.packages,
-        artifacts.classes,
-        artifacts.beans,
-        artifacts.endpoints,
-        artifacts.mybatis_mappers,
-        artifacts.jpa_entities,
-        artifacts.jpa_repositories,
-        artifacts.jpa_queries,
-        artifacts.config_files,
-        artifacts.test_classes,
-        artifacts.sql_statements,
-    )
     project_name = project.name or ""
-    java_stats.project_name = project_name
+    metadata = artifacts.metadata or {}
+    use_streaming_env = os.getenv("USE_STREAMING_PARSE", "false").lower() == "true"
+    streaming_mode = use_streaming_env or not artifacts.classes
+
+    if streaming_mode:
+        java_stats: Optional[JavaAnalysisStats] = None
+    else:
+        java_stats = calculate_java_statistics(
+            artifacts.packages,
+            artifacts.classes,
+            artifacts.beans,
+            artifacts.endpoints,
+            artifacts.mybatis_mappers,
+            artifacts.jpa_entities,
+            artifacts.jpa_repositories,
+            artifacts.jpa_queries,
+            artifacts.config_files,
+            artifacts.test_classes,
+            artifacts.sql_statements,
+        )
+        java_stats.project_name = project_name
 
     if db is None:
         logger.info("Connecting to Neo4j...")
@@ -582,11 +588,10 @@ def save_java_objects_to_neo4j(
     logger.info(f"Project 통계 집계 시작: clean={clean}, java_source_folder={java_source_folder}")
 
     # 스트리밍 모드 확인
-    use_streaming = os.getenv("USE_STREAMING_PARSE", "false").lower() == "true"
-    logger.info(f"스트리밍 모드: {use_streaming}")
+    logger.info(f"스트리밍 모드: {use_streaming_env}")
 
     # 스트리밍 모드이거나 artifacts.classes가 비어있으면 Neo4j에서 조회
-    if use_streaming or not artifacts.classes:
+    if streaming_mode:
         # Neo4j에서 모든 클래스를 조회하여 통계 계산
         logger.info("Neo4j에서 모든 클래스를 조회하여 통계 계산 중...")
         from csa.utils.project_statistics import calculate_project_statistics_from_neo4j
@@ -652,9 +657,37 @@ def save_java_objects_to_neo4j(
         logger.info("Created %s Method -> SqlStatement relationships", relationships_created)
 
     java_end_time = datetime.now()
-    java_stats.start_time = java_start_time
-    java_stats.end_time = java_end_time
-    logger.info("Java object analysis completed in %s", format_duration((java_end_time - java_start_time).total_seconds()))
+    if streaming_mode:
+        start_time = metadata.get("start_time") or java_start_time
+        end_time = metadata.get("end_time") or java_end_time
+        java_stats = get_java_stats_from_neo4j(
+            db,
+            project_name,
+            logger,
+            start_time=start_time,
+            end_time=end_time,
+        )
+        java_stats.project_name = project_name
+        total_files_meta = metadata.get("total_files")
+        processed_files_meta = metadata.get("processed_files")
+        error_files_meta = metadata.get("error_files")
+        if total_files_meta is not None:
+            java_stats.total_files = total_files_meta
+        if processed_files_meta is not None:
+            java_stats.processed_files = processed_files_meta
+        if error_files_meta is not None:
+            java_stats.error_files = error_files_meta
+        if metadata:
+            java_stats.metadata.update(metadata)
+        duration_seconds = (end_time - start_time).total_seconds()
+        java_stats.start_time = start_time
+        java_stats.end_time = end_time
+    else:
+        java_stats.start_time = java_start_time
+        java_stats.end_time = java_end_time
+        duration_seconds = (java_end_time - java_start_time).total_seconds()
+
+    logger.info("Java object analysis completed in %s", format_duration(duration_seconds))
 
     return java_stats
 
