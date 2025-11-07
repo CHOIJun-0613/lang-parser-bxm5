@@ -24,12 +24,71 @@ class AIEnrichmentService:
         self.analyzer = ai_analyzer
         self.logger = logger
 
+    def _clean_ai_descriptions(self, project_name: str, node_type: str) -> None:
+        """Clear ai_description fields for the specified project/node type."""
+        normalized = (node_type or "all").lower()
+        scopes: list[tuple[str, str]] = []
+
+        if normalized in ("all", "class"):
+            scopes.append((
+                "Class",
+                """
+                MATCH (c:Class)
+                WHERE c.project_name = $project_name
+                SET c.ai_description = ''
+                RETURN count(c) AS cnt
+                """,
+            ))
+
+        if normalized in ("all", "method"):
+            scopes.append((
+                "Method",
+                """
+                MATCH (c:Class)-[:HAS_METHOD]->(m:Method)
+                WHERE c.project_name = $project_name
+                SET m.ai_description = ''
+                RETURN count(m) AS cnt
+                """,
+            ))
+
+        if normalized in ("all", "sql"):
+            scopes.append((
+                "SqlStatement",
+                """
+                MATCH (s:SqlStatement)
+                WHERE s.project_name = $project_name
+                SET s.ai_description = ''
+                RETURN count(s) AS cnt
+                """,
+            ))
+
+        if not scopes:
+            self.logger.warning(f"Unknown node_type '{node_type}' for clean operation. Skipping cleanup.")
+            return
+
+        with self.db.driver.session(database=self.db.database) as session:
+            for label, query in scopes:
+                try:
+                    result = session.run(query, project_name=project_name)
+                    record = result.single()
+                    cleaned = record["cnt"] if record and "cnt" in record else 0
+                    self.logger.info(f"[CLEAN] {label}: cleared ai_description for {cleaned} nodes")
+                except Exception as exc:
+                    self.logger.error(f"[CLEAN] Failed to clear ai_description for {label}: {exc}")
+                    raise
+
     async def enrich_project_async(
         self,
         project_name: str,
         node_type: str = "all",
         concurrent_requests: Optional[int] = None,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        clean: bool = False,
+        target_class_name: Optional[str] = None,
+        target_method_name: Optional[str] = None,
+        target_mapper_name: Optional[str] = None,
+        target_sql_id: Optional[str] = None,
+        force: bool = False,
     ) -> Dict[str, Any]:
         """
         Enrich nodes in a project with AI-generated descriptions (비동기 병렬 처리).
@@ -39,6 +98,12 @@ class AIEnrichmentService:
             node_type: Node type to enrich (all, class, method, sql)
             concurrent_requests: Number of concurrent AI requests (None for env var)
             limit: Maximum number of nodes to process (None for all)
+            target_class_name: Specific class name to force re-analysis
+            target_method_name: Specific method name (requires class)
+            target_mapper_name: Mapper name for SQL re-analysis
+            target_sql_id: SQL identifier to re-analyze
+            force: Force overwrite even if ai_description already exists
+            clean: Remove existing ai_description values before re-analysis
 
         Returns:
             Dictionary with statistics
@@ -56,9 +121,29 @@ class AIEnrichmentService:
             "concurrent_requests": concurrent_requests
         }
 
+        target_specified = any(
+            value
+            for value in (
+                target_class_name,
+                target_method_name,
+                target_mapper_name,
+                target_sql_id,
+            )
+        )
+        force = force or target_specified
+
+        if clean:
+            self._clean_ai_descriptions(project_name, node_type)
+
         # 노드 타입별로 처리
         if node_type in ("all", "class"):
-            class_stats = await self._enrich_classes_async(project_name, concurrent_requests, limit)
+            class_stats = await self._enrich_classes_async(
+                project_name,
+                concurrent_requests,
+                limit,
+                class_name=target_class_name if node_type == "class" else None,
+                force=force if node_type == "class" and (target_class_name or target_specified) else False,
+            )
             stats["total_processed"] += class_stats["processed"]
             stats["success_count"] += class_stats["success"]
             stats["fail_count"] += class_stats["failed"]
@@ -66,7 +151,14 @@ class AIEnrichmentService:
             stats["node_type_stats"]["Class"] = class_stats
 
         if node_type in ("all", "method"):
-            method_stats = await self._enrich_methods_async(project_name, concurrent_requests, limit)
+            method_stats = await self._enrich_methods_async(
+                project_name,
+                concurrent_requests,
+                limit,
+                class_name=target_class_name if target_method_name else None,
+                method_name=target_method_name,
+                force=force if node_type == "method" and (target_method_name or target_specified) else False,
+            )
             stats["total_processed"] += method_stats["processed"]
             stats["success_count"] += method_stats["success"]
             stats["fail_count"] += method_stats["failed"]
@@ -74,7 +166,14 @@ class AIEnrichmentService:
             stats["node_type_stats"]["Method"] = method_stats
 
         if node_type in ("all", "sql"):
-            sql_stats = await self._enrich_sql_statements_async(project_name, concurrent_requests, limit)
+            sql_stats = await self._enrich_sql_statements_async(
+                project_name,
+                concurrent_requests,
+                limit,
+                mapper_name=target_mapper_name if node_type == "sql" else None,
+                sql_id=target_sql_id if node_type == "sql" else None,
+                force=force if node_type == "sql" and (target_mapper_name or target_sql_id) else False,
+            )
             stats["total_processed"] += sql_stats["processed"]
             stats["success_count"] += sql_stats["success"]
             stats["fail_count"] += sql_stats["failed"]
@@ -83,12 +182,19 @@ class AIEnrichmentService:
 
         return stats
 
+
     def enrich_project(
         self,
         project_name: str,
         node_type: str = "all",
         batch_size: int = 50,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        clean: bool = False,
+        target_class_name: Optional[str] = None,
+        target_method_name: Optional[str] = None,
+        target_mapper_name: Optional[str] = None,
+        target_sql_id: Optional[str] = None,
+        force: bool = False,
     ) -> Dict[str, Any]:
         """
         Enrich nodes in a project with AI-generated descriptions (하위 호환성을 위한 동기 버전).
@@ -98,6 +204,7 @@ class AIEnrichmentService:
             node_type: Node type to enrich (all, class, method, sql)
             batch_size: Batch size for processing (deprecated, use concurrent_requests)
             limit: Maximum number of nodes to process (None for all)
+            clean: Remove existing ai_description values before re-analysis
 
         Returns:
             Dictionary with statistics
@@ -107,14 +214,22 @@ class AIEnrichmentService:
             project_name=project_name,
             node_type=node_type,
             concurrent_requests=batch_size,  # batch_size를 concurrent_requests로 사용
-            limit=limit
+            limit=limit,
+            clean=clean,
+            target_class_name=target_class_name,
+            target_method_name=target_method_name,
+            target_mapper_name=target_mapper_name,
+            target_sql_id=target_sql_id,
+            force=force,
         ))
 
     def _enrich_classes(
         self,
         project_name: str,
         batch_size: int,
-        limit: Optional[int]
+        limit: Optional[int],
+        class_name: Optional[str] = None,
+        force: bool = False,
     ) -> Dict[str, int]:
         """Enrich Class nodes with AI descriptions."""
         stats = {"processed": 0, "success": 0, "failed": 0, "skipped": 0}
@@ -177,21 +292,33 @@ class AIEnrichmentService:
 
         return stats
 
+
     async def _enrich_classes_async(
         self,
         project_name: str,
         concurrent_requests: int,
-        limit: Optional[int]
+        limit: Optional[int],
+        class_name: Optional[str] = None,
+        force: bool = False,
     ) -> Dict[str, int]:
         """Enrich Class nodes with AI descriptions (비동기 병렬 처리)."""
         stats = {"processed": 0, "success": 0, "failed": 0, "skipped": 0}
 
-        # Neo4j 쿼리: ai_description이 비어있거나 없는 Class 노드 조회
-        query = """
+        conditions = [
+            "c.project_name = $project_name",
+            "c.source IS NOT NULL AND c.source <> ''",
+        ]
+        params: Dict[str, Any] = {"project_name": project_name}
+        if not force:
+            conditions.append("(c.ai_description IS NULL OR c.ai_description = '')")
+        if class_name:
+            conditions.append("c.name = $class_name")
+            params["class_name"] = class_name
+
+        where_clause = " AND ".join(conditions)
+        query = f"""
         MATCH (c:Class)
-        WHERE c.project_name = $project_name
-          AND (c.ai_description IS NULL OR c.ai_description = '')
-          AND c.source IS NOT NULL AND c.source <> ''
+        WHERE {where_clause}
         RETURN c.name as name,
                c.source as source,
                elementId(c) as node_id
@@ -201,7 +328,7 @@ class AIEnrichmentService:
             query += f" LIMIT {limit}"
 
         with self.db.driver.session(database=self.db.database) as session:
-            result = session.run(query, project_name=project_name)
+            result = session.run(query, **params)
             classes = list(result)
 
         total = len(classes)
@@ -212,38 +339,33 @@ class AIEnrichmentService:
         self.logger.info(f"Found {total} Class nodes to enrich")
         self.logger.info(f"Processing {total} Class nodes with {concurrent_requests} concurrent requests...")
 
-        # Semaphore로 동시 요청 수 제한
         semaphore = asyncio.Semaphore(concurrent_requests)
 
         async def process_class(record, index):
-            """단일 Class 노드 처리"""
+            """Single Class node processing"""
             async with semaphore:
-                class_name = record["name"]
+                class_name_val = record["name"]
                 source = record["source"]
                 node_id = record["node_id"]
 
                 try:
-                    # AI 분석 (비동기)
-                    ai_description = await self.analyzer.analyze_class_async(source, class_name)
+                    ai_description = await self.analyzer.analyze_class_async(source, class_name_val)
 
                     if ai_description:
-                        # Neo4j 업데이트
                         self._update_node_ai_description(node_id, ai_description)
-                        self.logger.info(f"[{index}/{total}] Class enriched: {class_name}")
-                        return {"status": "success", "name": class_name}
+                        self.logger.info(f"[{index}/{total}] Class enriched: {class_name_val}")
+                        return {"status": "success"}
                     else:
-                        self.logger.warning(f"[{index}/{total}] Class AI analysis returned empty: {class_name}")
-                        return {"status": "failed", "name": class_name}
+                        self.logger.warning(f"[{index}/{total}] Class AI analysis returned empty: {class_name_val}")
+                        return {"status": "failed"}
 
                 except Exception as exc:
-                    self.logger.error(f"[{index}/{total}] Class enrichment failed ({class_name}): {exc}")
-                    return {"status": "failed", "name": class_name}
+                    self.logger.error(f"[{index}/{total}] Class enrichment failed ({class_name_val}): {exc}")
+                    return {"status": "failed"}
 
-        # 모든 Class를 병렬 처리
-        tasks = [process_class(record, i+1) for i, record in enumerate(classes)]
+        tasks = [process_class(record, i + 1) for i, record in enumerate(classes)]
         results = await asyncio.gather(*tasks)
 
-        # 통계 계산
         for result in results:
             stats["processed"] += 1
             if result["status"] == "success":
@@ -254,88 +376,37 @@ class AIEnrichmentService:
         self.logger.info(f"Completed: {total}/{total} (100%) - Success: {stats['success']}, Failed: {stats['failed']}")
         return stats
 
-    def _enrich_methods(
-        self,
-        project_name: str,
-        batch_size: int,
-        limit: Optional[int]
-    ) -> Dict[str, int]:
-        """Enrich Method nodes with AI descriptions."""
-        stats = {"processed": 0, "success": 0, "failed": 0, "skipped": 0}
-
-        # Neo4j 쿼리: ai_description이 비어있거나 없는 Method 노드 조회
-        query = """
-        MATCH (c:Class)-[:HAS_METHOD]->(m:Method)
-        WHERE c.project_name = $project_name
-          AND (m.ai_description IS NULL OR m.ai_description = '')
-          AND m.source IS NOT NULL AND m.source <> ''
-        RETURN c.name as class_name,
-               m.name as method_name,
-               m.source as source,
-               elementId(m) as node_id
-        ORDER BY c.name, m.name
-        """
-        if limit:
-            query += f" LIMIT {limit}"
-
-        with self.db.driver.session(database=self.db.database) as session:
-            result = session.run(query, project_name=project_name)
-            methods = list(result)
-
-        total = len(methods)
-        if total == 0:
-            self.logger.info("No Method nodes found that need AI enrichment")
-            return stats
-
-        self.logger.info(f"Found {total} Method nodes to enrich")
-        self.logger.info(f"Processing {total} Method nodes...")
-
-        # 배치 처리
-        for i, record in enumerate(methods, 1):
-            class_name = record["class_name"]
-            method_name = record["method_name"]
-            source = record["source"]
-            node_id = record["node_id"]
-
-            try:
-                # AI 분석
-                ai_description = self.analyzer.analyze_method(source, method_name, class_name)
-
-                if ai_description:
-                    # Neo4j 업데이트
-                    self._update_node_ai_description(node_id, ai_description)
-                    stats["success"] += 1
-                    self.logger.info(f"[{i}/{total}] Method enriched: {class_name}.{method_name}")
-                else:
-                    stats["failed"] += 1
-                    self.logger.warning(f"[{i}/{total}] Method AI analysis returned empty: {class_name}.{method_name}")
-
-            except Exception as exc:
-                stats["failed"] += 1
-                self.logger.error(f"[{i}/{total}] Method enrichment failed ({class_name}.{method_name}): {exc}")
-
-            stats["processed"] += 1
-
-            # 진행률 표시
-            #if i % batch_size == 0 or i == total:
-            if i <= total:
-                click.echo(f"  Progress: {i}/{total} ({i*100//total}%) - Success: {stats['success']}, Failed: {stats['failed']}")
-
-        return stats
 
     async def _enrich_methods_async(
         self,
         project_name: str,
         concurrent_requests: int,
-        limit: Optional[int]
+        limit: Optional[int],
+        class_name: Optional[str] = None,
+        method_name: Optional[str] = None,
+        force: bool = False,
     ) -> Dict[str, int]:
         """Enrich Method nodes with AI descriptions (배치 처리)."""
         stats = {"processed": 0, "success": 0, "failed": 0, "skipped": 0}
 
-        # Neo4j 쿼리: 모든 Method 노드 조회 (ai_description 및 source 조건 제거)
-        query = """
+        conditions = [
+            "c.project_name = $project_name",
+            "m.source IS NOT NULL AND m.source <> ''",
+        ]
+        params: Dict[str, Any] = {"project_name": project_name}
+        if not force:
+            conditions.append("(m.ai_description IS NULL OR m.ai_description = '')")
+        if class_name:
+            conditions.append("c.name = $class_name")
+            params["class_name"] = class_name
+        if method_name:
+            conditions.append("m.name = $method_name")
+            params["method_name"] = method_name
+
+        where_clause = " AND ".join(conditions)
+        query = f"""
         MATCH (c:Class)-[:HAS_METHOD]->(m:Method)
-        WHERE c.project_name = $project_name
+        WHERE {where_clause}
         RETURN c.name as class_name,
                m.name as method_name,
                m.source as source,
@@ -346,7 +417,7 @@ class AIEnrichmentService:
             query += f" LIMIT {limit}"
 
         with self.db.driver.session(database=self.db.database) as session:
-            result = session.run(query, project_name=project_name)
+            result = session.run(query, **params)
             methods = list(result)
 
         total = len(methods)
@@ -357,29 +428,24 @@ class AIEnrichmentService:
         self.logger.info(f"Found {total} Method nodes to enrich")
         self.logger.info(f"Processing {total} Method nodes with batch size 5...")
 
-        # 배치 크기 (5개씩 묶어서 처리)
         batch_size = 5
-
-        # Semaphore로 동시 요청 수 제한
         semaphore = asyncio.Semaphore(concurrent_requests)
 
         async def process_method_batch(batch_records, batch_start_index):
-            """배치 Method 노드 처리 (5개씩)"""
+            """Process a batch of Method nodes."""
             async with semaphore:
-                # 배치 입력 데이터 준비
                 method_items = []
-                node_id_map = {}  # method_id -> node_id 매핑
-                skipped_methods = []  # 유효하지 않은 Method 목록
+                node_id_map = {}
+                skipped_methods = []
 
                 for record in batch_records:
-                    class_name = record["class_name"]
-                    method_name = record["method_name"]
+                    class_name_val = record["class_name"]
+                    method_name_val = record["method_name"]
                     source = record["source"]
                     node_id = record["node_id"]
 
-                    method_id = f"{class_name}.{method_name}"
+                    method_id = f"{class_name_val}.{method_name_val}"
 
-                    # 유효성 검증: source, project_name, class_name 체크
                     is_valid = True
                     skip_reason = []
 
@@ -387,16 +453,11 @@ class AIEnrichmentService:
                         is_valid = False
                         skip_reason.append("source is empty")
 
-                    if not project_name or project_name.strip() == "":
-                        is_valid = False
-                        skip_reason.append("project_name is empty")
-
-                    if not class_name or class_name.strip() == "":
+                    if not class_name_val or class_name_val.strip() == "":
                         is_valid = False
                         skip_reason.append("class_name is empty")
 
                     if not is_valid:
-                        # 유효하지 않은 경우 빈 문자열로 즉시 업데이트
                         skipped_methods.append({
                             "method_id": method_id,
                             "node_id": node_id,
@@ -408,33 +469,28 @@ class AIEnrichmentService:
                         except Exception as exc:
                             self.logger.error(f"Method Neo4j update failed for skipped ({method_id}): {exc}")
                     else:
-                        # 유효한 경우만 LLM 호출 대상에 추가
                         method_items.append({
                             "method_id": method_id,
-                            "class_name": class_name,
-                            "method_name": method_name,
+                            "class_name": class_name_val,
+                            "method_name": method_name_val,
                             "source": source
                         })
                         node_id_map[method_id] = {
                             "node_id": node_id,
-                            "class_name": class_name,
-                            "method_name": method_name
+                            "class_name": class_name_val,
+                            "method_name": method_name_val
                         }
 
                 batch_stats = {"success": 0, "failed": 0, "skipped": len(skipped_methods)}
 
-                # 유효한 Method가 있는 경우에만 LLM 호출
                 if method_items:
                     try:
-                        # AI 배치 분석 (비동기)
                         batch_results = await self.analyzer.analyze_method_batch_async(method_items)
 
-                        # 각 결과를 Neo4j에 업데이트
                         for method_id, ai_description in batch_results.items():
                             node_info = node_id_map.get(method_id)
                             if node_info and ai_description:
                                 try:
-                                    # Neo4j 업데이트
                                     self._update_node_ai_description(node_info["node_id"], ai_description)
                                     batch_stats["success"] += 1
                                     self.logger.debug(f"Method enriched: {method_id}")
@@ -444,7 +500,6 @@ class AIEnrichmentService:
                             else:
                                 batch_stats["failed"] += 1
 
-                        # 실패한 항목 (응답에 없는 Method)
                         missing_count = len(method_items) - len(batch_results)
                         batch_stats["failed"] += missing_count
 
@@ -460,16 +515,13 @@ class AIEnrichmentService:
 
                 return batch_stats
 
-        # 배치 단위로 처리
         batch_tasks = []
         for i in range(0, total, batch_size):
-            batch = methods[i:i+batch_size]
-            batch_tasks.append(process_method_batch(batch, i+1))
+            batch = methods[i:i + batch_size]
+            batch_tasks.append(process_method_batch(batch, i + 1))
 
-        # 모든 배치를 병렬 처리
         batch_results = await asyncio.gather(*batch_tasks)
 
-        # 통계 계산
         for batch_stat in batch_results:
             stats["processed"] += batch_stat["success"] + batch_stat["failed"] + batch_stat.get("skipped", 0)
             stats["success"] += batch_stat["success"]
@@ -548,20 +600,37 @@ class AIEnrichmentService:
 
         return stats
 
+
     async def _enrich_sql_statements_async(
         self,
         project_name: str,
         concurrent_requests: int,
-        limit: Optional[int]
+        limit: Optional[int],
+        mapper_name: Optional[str] = None,
+        sql_id: Optional[str] = None,
+        force: bool = False,
     ) -> Dict[str, int]:
         """Enrich SqlStatement nodes with AI descriptions (배치 처리)."""
         stats = {"processed": 0, "success": 0, "failed": 0, "skipped": 0}
 
-        # Neo4j 쿼리: 모든 SqlStatement 노드 조회 (ai_description 조건 제거)
-        query = """
+        conditions = [
+            "s.project_name = $project_name",
+            "s.sql_content IS NOT NULL AND s.sql_content <> ''",
+        ]
+        params: Dict[str, Any] = {"project_name": project_name}
+        if not force:
+            conditions.append("(s.ai_description IS NULL OR s.ai_description = '')")
+        if mapper_name:
+            conditions.append("s.mapper_name = $mapper_name")
+            params["mapper_name"] = mapper_name
+        if sql_id:
+            conditions.append("s.id = $sql_id")
+            params["sql_id"] = sql_id
+
+        where_clause = " AND ".join(conditions)
+        query = f"""
         MATCH (s:SqlStatement)
-        WHERE s.project_name = $project_name
-          AND s.sql_content IS NOT NULL AND s.sql_content <> ''
+        WHERE {where_clause}
         RETURN s.id as sql_id,
                s.mapper_name as mapper_name,
                s.sql_content as sql_content,
@@ -572,7 +641,7 @@ class AIEnrichmentService:
             query += f" LIMIT {limit}"
 
         with self.db.driver.session(database=self.db.database) as session:
-            result = session.run(query, project_name=project_name)
+            result = session.run(query, **params)
             sql_statements = list(result)
 
         total = len(sql_statements)
@@ -583,55 +652,47 @@ class AIEnrichmentService:
         self.logger.info(f"Found {total} SqlStatement nodes to enrich")
         self.logger.info(f"Processing {total} SqlStatement nodes with batch size 5...")
 
-        # 배치 크기 (5개씩 묶어서 처리)
         batch_size = 5
-
-        # Semaphore로 동시 요청 수 제한
         semaphore = asyncio.Semaphore(concurrent_requests)
 
         async def process_sql_batch(batch_records, batch_start_index):
-            """배치 SQL 노드 처리 (5개씩)"""
+            """Process a batch of SQL nodes."""
             async with semaphore:
-                # 배치 입력 데이터 준비
                 sql_items = []
-                node_id_map = {}  # sql_id -> node_id 매핑
+                node_id_map = {}
                 for record in batch_records:
-                    sql_id = record["sql_id"]
+                    sql_id_val = record["sql_id"]
                     sql_content = record["sql_content"]
-                    node_id = record["node_id"]
+                    node_id_val = record["node_id"]
 
                     sql_items.append({
-                        "sql_id": sql_id,
+                        "sql_id": sql_id_val,
                         "sql_content": sql_content
                     })
-                    node_id_map[sql_id] = {
-                        "node_id": node_id,
+                    node_id_map[sql_id_val] = {
+                        "node_id": node_id_val,
                         "mapper_name": record["mapper_name"]
                     }
 
                 try:
-                    # AI 배치 분석 (비동기)
                     batch_results = await self.analyzer.analyze_sql_batch_async(sql_items)
 
                     batch_stats = {"success": 0, "failed": 0}
 
-                    # 각 결과를 Neo4j에 업데이트
-                    for sql_id, ai_description in batch_results.items():
-                        node_info = node_id_map.get(sql_id)
+                    for sql_id_val, ai_description in batch_results.items():
+                        node_info = node_id_map.get(sql_id_val)
                         if node_info and ai_description:
                             try:
-                                # Neo4j 업데이트
                                 self._update_node_ai_description(node_info["node_id"], ai_description)
                                 batch_stats["success"] += 1
-                                mapper_name = node_info["mapper_name"]
-                                self.logger.debug(f"SQL enriched: {mapper_name}.{sql_id}")
+                                mapper_name_val = node_info["mapper_name"]
+                                self.logger.debug(f"SQL enriched: {mapper_name_val}.{sql_id_val}")
                             except Exception as exc:
                                 batch_stats["failed"] += 1
-                                self.logger.error(f"SQL Neo4j update failed ({sql_id}): {exc}")
+                                self.logger.error(f"SQL Neo4j update failed ({sql_id_val}): {exc}")
                         else:
                             batch_stats["failed"] += 1
 
-                    # 실패한 항목 (응답에 없는 SQL)
                     missing_count = len(sql_items) - len(batch_results)
                     batch_stats["failed"] += missing_count
 
@@ -647,16 +708,13 @@ class AIEnrichmentService:
                     self.logger.error(f"SQL batch enrichment failed (batch {batch_start_index}): {exc}")
                     return {"success": 0, "failed": len(batch_records)}
 
-        # 배치 단위로 처리
         batch_tasks = []
         for i in range(0, total, batch_size):
-            batch = sql_statements[i:i+batch_size]
-            batch_tasks.append(process_sql_batch(batch, i+1))
+            batch = sql_statements[i:i + batch_size]
+            batch_tasks.append(process_sql_batch(batch, i + 1))
 
-        # 모든 배치를 병렬 처리
         batch_results = await asyncio.gather(*batch_tasks)
 
-        # 통계 계산
         for batch_stat in batch_results:
             stats["processed"] += batch_stat["success"] + batch_stat["failed"]
             stats["success"] += batch_stat["success"]

@@ -50,8 +50,43 @@ def _ensure_password() -> str | None:
     type=int,
     help="Maximum number of nodes to process (default: all)",
 )
+@click.option(
+    "--clean",
+    is_flag=True,
+    help="Clear ai_description for the selected project/node-type before re-analysis",
+)
+@click.option("--class-name", default=None, help="Target a specific Class node")
+@click.option(
+    "--method-name",
+    default=None,
+    help="Target a specific Method node (requires --class-name)",
+)
+@click.option(
+    "--mapper-name",
+    default=None,
+    help="Target a specific SqlStatement mapper (requires --sql-id)",
+)
+@click.option(
+    "--sql-id",
+    default=None,
+    help="Target a specific SqlStatement id (requires --mapper-name)",
+)
 @with_command_lifecycle("ai-enrich")
-def ai_enrich_command(neo4j_uri, neo4j_user, neo4j_database, project_name, node_type, concurrent, batch_size, limit):
+def ai_enrich_command(
+    neo4j_uri,
+    neo4j_user,
+    neo4j_database,
+    project_name,
+    node_type,
+    concurrent,
+    batch_size,
+    limit,
+    clean,
+    class_name,
+    method_name,
+    mapper_name,
+    sql_id,
+):
     """Add AI-generated descriptions to existing Neo4j nodes without ai_description (with async parallel processing)."""
 
     # 명령어 실행 직전에 컨텍스트 설정
@@ -77,6 +112,54 @@ def ai_enrich_command(neo4j_uri, neo4j_user, neo4j_database, project_name, node_
         result["error"] = f"Failed to initialize AI analyzer: {exc}"
         logger.error(result["error"])
         return result
+
+    # Targeted 재분석 옵션 처리
+    target_params: dict[str, str | None] = {
+        "target_class_name": None,
+        "target_method_name": None,
+        "target_mapper_name": None,
+        "target_sql_id": None,
+    }
+    force_mode = False
+
+    if method_name and not class_name:
+        result["error"] = "--method-name requires --class-name"
+        logger.error(result["error"])
+        return result
+
+    if (mapper_name and not sql_id) or (sql_id and not mapper_name):
+        result["error"] = "--mapper-name and --sql-id must be used together"
+        logger.error(result["error"])
+        return result
+
+    if class_name and mapper_name:
+        result["error"] = "Choose either class/method targeting or mapper/sql targeting"
+        logger.error(result["error"])
+        return result
+
+    if clean and (class_name or method_name or mapper_name or sql_id):
+        result["error"] = "--clean cannot be combined with --class-name/--method-name/--mapper-name/--sql-id"
+        logger.error(result["error"])
+        return result
+
+    if class_name:
+        target_params["target_class_name"] = class_name
+        if method_name:
+            node_type = "method"
+            target_params["target_method_name"] = method_name
+            force_mode = True
+            logger.info(f"Targeting Method {class_name}.{method_name} (force re-analysis)")
+        else:
+            node_type = "class"
+            force_mode = True
+            logger.info(f"Targeting Class {class_name} (force re-analysis)")
+
+    if mapper_name and sql_id:
+        target_params["target_mapper_name"] = mapper_name
+        target_params["target_sql_id"] = sql_id
+        node_type = "sql"
+        force_mode = True
+        logger.info(f"Targeting SqlStatement {mapper_name}.{sql_id} (force re-analysis)")
 
     # concurrent 옵션 결정 (하위 호환성)
     if concurrent is None and batch_size is not None:
@@ -111,7 +194,13 @@ def ai_enrich_command(neo4j_uri, neo4j_user, neo4j_database, project_name, node_
             project_name=project_name,
             node_type=node_type,
             batch_size=concurrent,
-            limit=limit
+            limit=limit,
+            clean=clean,
+            target_class_name=target_params["target_class_name"],
+            target_method_name=target_params["target_method_name"],
+            target_mapper_name=target_params["target_mapper_name"],
+            target_sql_id=target_params["target_sql_id"],
+            force=force_mode,
         )
 
         end_time = datetime.now()
