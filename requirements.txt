@@ -7,7 +7,8 @@ python-dotenv
 PyYAML
 pandas
 openpyxl
-google-adk
+#google-adk
+google-genai
 psutil
 pathspec
 litellm>=1.43.0
