@@ -10,3 +10,4 @@ openpyxl
 google-adk
 psutil
 pathspec
+litellm>=1.43.0
